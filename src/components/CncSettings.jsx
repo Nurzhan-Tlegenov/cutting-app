@@ -218,6 +218,7 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
                 {others.map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний (XML по деталям)' : p.drillHead ? 'раскроечный с присадочной головой (G-код)' : 'раскроечный (G-код)'}</option>)}
               </select>
             )}
+            {isMaster && drill && <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 2, marginBottom: 6 }}>Это ваш выбор станков для выпуска программ — в постпроцессор «{post.name}» не входит и при выдаче не передаётся: у пользователя здесь будет его собственный раскроечный станок. Ваши команды и инструменты («{router?.name}») в выданный постпроцессор не попадают.</div>}
             <Hint>{!others.length ? 'Второго станка пока нет — добавьте его: «Выбрать ▾» сверху → «+ Раскроечный станок» или «+ Присадочный 6-стор.».'
               : sec ? `«Создать программы» в заказе выпустит G-код «${router?.name}» и ${isDrill6(sec) ? 'файлы по деталям' : 'G-код'} «${sec.name}». «Сохранить все файлы» — одним разом, у каждого станка своя папка.`
                 : 'Только раскроечный станок. Включите галочку, чтобы вместе с ним выпускать программы для второго станка.'}</Hint>
@@ -706,25 +707,30 @@ function PmskSettings({ post, set }) {
         <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>Чтобы номера торцов были на бирке: шаблон бирок → «Чертёж детали» → галочка <b>«Номера торцов для торцевой присадки»</b>, и на бирке должен стоять элемент «Чертёж детали».</span>
       </div>
       <div style={{ fontSize: 12.5, fontWeight: 500, marginTop: 10 }}>Шпиндели и что в них стоит</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '58px 1fr 62px 70px 70px', gap: 4, marginTop: 4, fontSize: 11, color: 'var(--text-hint)' }}>
-        <span>Имя</span><span>Инструмент</span><span>Ø, мм</span><span>За проход</span><span>Длина</span>
-      </div>
-      {[...tools, null].map((t, i) => (
-        <div key={i + ':' + (t ? t.name + t.kind + t.d + t.step + t.len : 'new')} style={{ display: 'grid', gridTemplateColumns: '58px 1fr 62px 70px 70px', gap: 4, marginTop: 4 }}>
-          <input type="text" defaultValue={t?.name || ''} placeholder={`T${tools.length + 1}`} onBlur={e => { const v = e.target.value.trim(); if (v !== (t?.name || '')) setT(i, { name: v }) }} style={cell} />
-          {t ? (
-            <select value={t.kind} onChange={e => setT(i, { kind: e.target.value })} style={cell}>
+      {tools.map((t, i) => (
+        <div key={i + ':' + t.name + t.kind + t.d + t.step + t.len} style={{ border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', padding: '8px 8px 6px', marginTop: 6 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="text" defaultValue={t.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== t.name) setT(i, { name: v }) }} style={{ ...cell, width: 64, flex: '0 0 64px', fontWeight: 600 }} />
+            <select value={t.kind} onChange={e => setT(i, { kind: e.target.value })} style={{ ...cell, flex: 1, width: 'auto' }}>
               <option value="drill">сверло</option>
               <option value="mill">фреза</option>
             </select>
-          ) : <span style={{ fontSize: 11, color: 'var(--text-hint)', alignSelf: 'center' }}>+ ещё шпиндель</span>}
-          {['d', 'step', 'len'].map(f => (
-            <input key={f} type="text" inputMode="decimal" defaultValue={t && t[f] ? String(t[f]).replace('.', ',') : ''} placeholder={f === 'd' ? 'Ø' : '—'} disabled={!t && f !== 'd'}
-              onBlur={e => { const v = Number(e.target.value.replace(',', '.')) || 0; if (t ? v !== t[f] : v > 0) setT(i, { [f]: v }) }} style={cell} />
-          ))}
+            <button type="button" title="Удалить шпиндель" onClick={() => { if (window.confirm(`Удалить шпиндель ${t.name}?`)) setP({ tools: tools.filter((_, j) => j !== i) }) }}
+              style={{ flex: '0 0 34px', height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--danger)', fontSize: 14 }}>✕</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 6 }}>
+            {[['d', 'Ø, мм'], ['step', 'За проход, мм'], ['len', 'Длина, мм']].map(([f, l]) => (
+              <label key={f} style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', minWidth: 0 }}>{l}
+                <input type="text" inputMode="decimal" defaultValue={t[f] ? String(t[f]).replace('.', ',') : ''} placeholder={f === 'step' ? 'всё сразу' : f === 'len' ? '—' : ''}
+                  onBlur={e => { const v = Number(e.target.value.replace(',', '.')) || 0; if (v !== t[f] && (f !== 'd' || v > 0)) setT(i, { [f]: v }) }} style={{ ...cell, width: '100%', marginTop: 2 }} />
+              </label>
+            ))}
+          </div>
         </div>
       ))}
-      <Hint>Имя — как команда на станке (T1, T2). Пустое имя или Ø — шпиндель удаляется. «За проход» — сколько мм вглубь за один проход (пусто — сразу на всю глубину): глубокий паз или выемка фрезой идут в несколько проходов, сверло — с выводом для стружки. «Длина» — рабочая длина инструмента: глубже — предупреждение. Отверстие — сверлом своего Ø; если такого сверла нет — фрезой меньшего Ø (от центра винтом вниз, потом кольцами наружу). Паз и выемка в торце — самой широкой фрезой не шире паза: вход наклоном вдоль торца, строчки по высоте, чистовой обход.</Hint>
+      <button type="button" onClick={() => setT(tools.length, { name: `T${tools.length + 1}` })}
+        style={{ marginTop: 6, width: '100%', padding: '8px', borderRadius: 'var(--radius)', border: '1px dashed var(--amber)', background: 'transparent', color: 'var(--amber)', fontSize: 13 }}>+ Добавить шпиндель</button>
+      <Hint>Имя — как команда на станке (T1, T2). «За проход» — сколько мм вглубь за один проход (пусто — сразу на всю глубину): глубокий паз или выемка фрезой идут в несколько проходов, сверло — с выводом для стружки. «Длина» — рабочая длина инструмента: глубже — предупреждение. Отверстие — сверлом своего Ø; если такого сверла нет — фрезой меньшего Ø (от центра винтом вниз, потом кольцами наружу). Паз и выемка в торце — самой широкой фрезой не шире паза: вход наклоном вдоль торца, строчки по высоте, чистовой обход.</Hint>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
         <SignedNum label="Безопасный отскок Y" unit="мм" value={k.retract} onChange={v => setP({ retract: v })} />
         <Num label="Шаг дуги" unit="мм" value={k.seg} onChange={v => setP({ seg: v })} hint="круг отрезками G01 X Z" />

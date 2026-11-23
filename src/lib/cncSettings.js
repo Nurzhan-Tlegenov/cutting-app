@@ -114,6 +114,8 @@ export function withoutTools(p) {
   const out = { ...p, d6Tools: [], d6Ops: ops, d6ToolAuto: true, d6Tool: '' }
   if (p.d6b) out.d6b = { ...p.d6b, grooveTool: '' }
   if (p.kdt) out.kdt = { ...p.kdt, top: [], bottom: [] }
+  // торцевой PMSK: шпиндели и подачи — свои у каждого станка; выданный приходит с T1 сверло Ø8, T2 сверло Ø5 (как в образце)
+  if (p.pmsk) { const { tools: _t, feed: _f, plunge: _p, t1: _a, t2: _b, ...rest } = p.pmsk; void _t; void _f; void _p; void _a; void _b; out.pmsk = rest }
   return out
 }
 export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
