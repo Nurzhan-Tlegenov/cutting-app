@@ -103,7 +103,9 @@ export function partFeatures(p, detail, T, skip = null) {
   const at = (x, y) => { const q = rotatePointTimes(x, y, W, H, times); return [q.x, q.y] }
   const open = bb => ({ l: bb.x0 <= EPS, r: bb.x1 >= f.pw - EPS, b: bb.y0 <= EPS, t: bb.y1 >= f.ph - EPS })
 
-  ;(contour.holes || []).forEach(hole => {
+  const gone = new Set(p.cut?.holes || [])          // «по габаритам выборочно»: убранные вырезы режутся потом, не здесь
+  ;(contour.holes || []).forEach((hole, hi) => {
+    if (gone.has(hi)) return
     const poly = detailHoles({ width: W, length: H, contour: JSON.stringify({ holes: [hole] }) })[0]
     if (!poly) return
     const pts = poly.map(q => at(q.x, q.y)), bb = bboxOf(pts)

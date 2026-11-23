@@ -11,6 +11,7 @@
 //
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
+import { cutContour, offHoles } from './shapeFeatures'
 import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut, sweepLast, insertLeftovers } from './nesting'
 import { runBeamSaw } from './beamSawNesting'
 import { beamSettings } from './beamSaw'
@@ -698,23 +699,28 @@ export const boxKey = (d, i) => String((d?._raw || d)?.id ?? 'i' + i)
 
 export async function runLiveNesting(params, opts = {}) {
   if (params.beamSaw) return runBeamSawStock(params, opts)
-  // «Фигурные детали — по габаритам» → «Выборочно»: прямоугольником габарита укладываются (и режутся) только отмеченные
-  // фигурные детали, остальные — по своему контуру. Отмеченным контур на входе снимается, на выходе они помечаются p.box
-  // (без polygon) — как при галочке на все детали: фрезер режет их прямоугольником, на бирке — настоящий силуэт
-  if (!params.byBox && Array.isArray(params.boxIds) && params.boxIds.length) {
-    const pick = new Set(params.boxIds.map(String)), idx = new Set()
-    const details = params.details.map((d, i) => { if (!pick.has(boxKey(d, i))) return d; idx.add(i); return { ...d, contour: null } })
-    if (idx.size) {
-      const mark = list => (list || []).map(sh => ({ ...sh, placed: (sh.placed || []).map(p => { if (!idx.has(p.detailIndex)) return p; const q = { ...p, box: true }; delete q.polygon; return q }) }))
-      const fix = res => (res?.sheets ? { ...res, sheets: mark(res.sheets), ...(res.rawSheets ? { rawSheets: mark(res.rawSheets) } : {}), boxIds: [...pick] } : res)
-      const inner = { ...params, details, boxIds: null }
-      if (Array.isArray(inner.seed?.sheets)) inner.seed = { ...inner.seed, sheets: inner.seed.sheets.map(sh => ({ ...sh, placed: (sh.placed || []).map(p => { if (!idx.has(p.detailIndex)) return p; const q = { ...p }; delete q.polygon; delete q.rotation; return q }) })) }
+  // «Фигурные детали — по габаритам» → «Выборочно» (boxCut: ключ детали -> убранные элементы, см. shapeFeatures.js):
+  // у отмеченных деталей скругления, срезы, вырезы на краю и внутренние вырезы, убранные в габарит, на входе снимаются —
+  // деталь укладывается тем силуэтом, которым её режут. На выходе такие детали помечаются p.cut = { off, holes }:
+  // фрезер режет p.polygon (без убранного) и не режет убранные вырезы, на карте и бирке — настоящий силуэт
+  if (!params.byBox && params.boxCut && typeof params.boxCut === 'object') {
+    const marks = new Map()
+    const details = params.details.map((d, i) => {
+      const off = params.boxCut[boxKey(d, i)]
+      if (!Array.isArray(off) || !off.length) return d
+      let contour
+      try { contour = cutContour(d, off) } catch { return d }
+      marks.set(i, { off: [...off], holes: offHoles(d, off) })
+      return { ...d, contour }
+    })
+    if (marks.size) {
+      const mark = list => (list || []).map(sh => ({ ...sh, placed: (sh.placed || []).map(p => (marks.has(p.detailIndex) ? { ...p, cut: marks.get(p.detailIndex) } : p)) }))
+      const fix = res => (res?.sheets ? { ...res, sheets: mark(res.sheets), ...(res.rawSheets ? { rawSheets: mark(res.rawSheets) } : {}), boxCut: params.boxCut } : res)
+      const inner = { ...params, details, boxCut: null }
       const onProgress = opts.onProgress ? res => opts.onProgress(fix(res)) : null
       return fix(await runLiveNesting(inner, { ...opts, onProgress }))
     }
-  }   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
-  // Группы деталей с общей текстурой: фрезер и форматник со складом обрезков — группа одним блоком на входе, детали на
-  // выходе (partGroupBlocks.js); форматник без склада знает группы сам (полосами, beamSawNesting)
+  }
   const stripsPath = (params.cuttingMethod || 'nesting') === 'guillotine' && !params.offcuts?.items?.length
   if (!stripsPath) {
     const gb = groupBlocks(params)

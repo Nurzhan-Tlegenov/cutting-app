@@ -1,28 +1,31 @@
-// «Фигурные детали — по габаритам» → «Выборочно» (страница раскроя): какие фигурные детали укладывать и резать
-// прямоугольником габарита (вырез — потом: после кромки, на шестистороннем), а какие — сразу по контуру.
-// value — ключи отмеченных деталей (boxKey из liveNesting.js: id строки заказа)
-import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
+// «Фигурные детали — по габаритам» → «Выборочно» (страница раскроя): у каждой фигурной детали — её элементы
+// (скругления, косые срезы, вырезы на краю, внутренние вырезы, см. shapeFeatures.js). Галочка у элемента — резать сразу;
+// снята — убрать в габарит: вырезать потом (после кромки, на шестистороннем). Галочка у детали — весь контур по
+// габариту (прямоугольником). value / onChange — { ключ детали (boxKey): [убранные элементы] }
+import { useState } from 'react'
 import { boxKey } from '../lib/liveNesting'
 import { detailHoles } from '../lib/partHoles'
 import { detailMeta, metaDes, metaPos } from '../lib/partLabel'
+import { shapeFeatures, cutSilhouette } from '../lib/shapeFeatures'
 
 const r1 = v => Math.round((Number(v) || 0) * 10) / 10
 
-function Thumb({ poly, holes = [], w, l }) {
-  const S = 44, k = Math.min((S - 4) / (w || 1), (S - 4) / (l || 1)), ox = (S - w * k) / 2, oy = (S - l * k) / 2
+function Thumb({ sil, cut, holes = [], off = [], w, l }) {
+  const S = 48, k = Math.min((S - 4) / (w || 1), (S - 4) / (l || 1)), ox = (S - w * k) / 2, oy = (S - l * k) / 2
   const pts = list => list.map(([x, y]) => `${(ox + x * k).toFixed(1)},${(S - oy - y * k).toFixed(1)}`).join(' ')
   return (
     <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ flex: '0 0 auto' }}>
-      <rect x={ox} y={oy} width={w * k} height={l * k} fill="none" stroke="var(--text-hint)" strokeWidth="0.6" strokeDasharray="2 2" />
-      <polygon points={pts(poly)} fill="var(--bg2)" stroke="var(--text-muted)" strokeWidth="1" />
-      {holes.map((h, i) => <polygon key={i} points={pts(h)} fill="var(--bg)" stroke="var(--danger)" strokeWidth="0.8" />)}
+      {cut && <polygon points={pts(cut)} fill="var(--amber-light)" stroke="var(--amber)" strokeWidth="0.8" strokeDasharray="2 2" />}
+      <polygon points={pts(sil)} fill="var(--bg2)" fillOpacity={cut ? 0.85 : 1} stroke="var(--text-muted)" strokeWidth="1" />
+      {holes.map(h => <polygon key={h.i} points={pts(h.pts)} fill={off.includes(h.i) ? 'var(--amber-light)' : 'var(--bg)'} stroke={off.includes(h.i) ? 'var(--amber)' : 'var(--danger)'} strokeWidth="0.8" strokeDasharray={off.includes(h.i) ? '2 2' : undefined} />)}
     </svg>
   )
 }
 
 // подпись — как на карте раскроя (labelMode): обозначение, позиция, наименование
-function titleOf(d, r, mode) {
-  const name = String(r.name || d.name || 'Деталь')
+function titleOf(d, mode) {
+  const r = d?._raw || d
+  const name = String(r?.name || d?.name || 'Деталь')
   const m = detailMeta(d) || detailMeta(r), des = metaDes(m), pos = metaPos(m)
   if (mode === 'des') return des || name
   if (mode === 'des_name') return des ? `${des} ${name}` : name
@@ -32,37 +35,68 @@ function titleOf(d, r, mode) {
 }
 
 export default function ShapedPick({ details, value, onChange, labelMode = 'name' }) {
-  const sel = new Set((value || []).map(String))
+  const [open, setOpen] = useState({})
+  const map = value || {}
   const parts = []
   ;(details || []).forEach((d, i) => {
-    const r = d?._raw || d
-    let pr
-    try { pr = parsePolygonFromDetail({ ...d, contour: typeof d.contour === 'string' ? d.contour : d.contour ? JSON.stringify(d.contour) : null }) } catch { pr = null }
-    if (!pr?.custom) return
-    parts.push({ key: boxKey(d, i), name: titleOf(d, r, labelMode), w: Number(d.width) || 0, l: Number(d.length) || 0, qty: Number(d.qty) || 1, poly: pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])), holes: (() => { try { return detailHoles(d).map(h => h.map(q => [q.x, q.y])) } catch { return [] } })() })
+    const f = shapeFeatures(d)
+    if (!f || !f.feats.length) return
+    const key = boxKey(d, i)
+    const off = (map[key] || []).filter(id => f.feats.some(x => x.id === id))
+    let holes
+    try {
+      const c = typeof d.contour === 'string' ? JSON.parse(d.contour) : d.contour
+      holes = (c?.holes || []).map((h, hi) => (h?.type === 'pocket' ? null : { i: hi, pts: (detailHoles({ width: d.width, length: d.length, contour: JSON.stringify({ holes: [h] }) })[0] || []).map(q => [q.x, q.y]) })).filter(h => h && h.pts.length)
+    } catch { holes = [] }
+    const offHoleIdx = f.feats.filter(x => x.kind === 'hole' && off.includes(x.id)).map(x => x.hole)
+    parts.push({ key, f, off, holes, offHoleIdx, name: titleOf(d, labelMode), w: Number(d.width) || 0, l: Number(d.length) || 0, qty: Number(d.qty) || 1,
+      cut: off.some(id => id[0] === 'o') ? cutSilhouette(d, off) : null })
   })
   if (!parts.length) return null
-  const put = (keys, on) => { const n = new Set(sel); keys.forEach(k => (on ? n.add(k) : n.delete(k))); onChange([...n].filter(k => parts.some(p => p.key === k))) }
-  const nOn = parts.filter(p => sel.has(p.key)).length
+  const set = (key, off) => onChange({ ...map, [key]: off })
+  const outl = p => p.f.feats.filter(x => x.kind !== 'hole').map(x => x.id)
+  const allBox = p => outl(p).length > 0 && outl(p).every(id => p.off.includes(id))
+  const setAll = on => onChange(Object.fromEntries(parts.map(p => [p.key, on ? [...new Set([...p.off, ...outl(p)])] : p.off.filter(id => id[0] === 'h')])))
   const small = { padding: '3px 9px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }
+  const nOn = parts.filter(p => p.off.length).length
   return (
     <div style={{ marginTop: 6, marginLeft: 23 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>
-        <span style={{ flex: 1 }}>По габаритам: {nOn} из {parts.length}. Не отмеченные — по контуру.</span>
-        <button type="button" style={small} onClick={() => put(parts.map(p => p.key), true)}>все</button>
-        <button type="button" style={small} onClick={() => put(parts.map(p => p.key), false)}>никакие</button>
+        <span style={{ flex: 1 }}>Что-то убрано в габарит: {nOn} из {parts.length}</span>
+        <button type="button" style={small} onClick={() => setAll(true)}>все по габариту</button>
+        <button type="button" style={small} onClick={() => setAll(false)}>все по контуру</button>
       </div>
-      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-        {parts.map(p => (
-          <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={sel.has(p.key)} onChange={e => put([p.key], e.target.checked)} style={{ width: 17, height: 17, flex: '0 0 auto' }} />
-            <Thumb poly={p.poly} holes={p.holes} w={p.w} l={p.l} />
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
-              <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r1(p.l)} × {r1(p.w)} · {p.qty} шт · {sel.has(p.key) ? 'по габариту (прямоугольник)' : 'по контуру'}</span>
-            </span>
-          </label>
-        ))}
+      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+        {parts.map(p => {
+          const box = allBox(p), some = p.off.length > 0, isOpen = !!open[p.key]
+          return (
+            <div key={p.key} style={{ borderTop: '0.5px solid var(--border)', padding: '3px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {outl(p).length > 0
+                  ? <input type="checkbox" title="Весь контур — по габариту (прямоугольником)" checked={box} ref={el => { if (el) el.indeterminate = !box && p.off.some(id => id[0] === 'o') }}
+                      onChange={e => set(p.key, e.target.checked ? [...new Set([...p.off, ...outl(p)])] : p.off.filter(id => id[0] === 'h'))} style={{ width: 17, height: 17, flex: '0 0 auto' }} />
+                  : <span style={{ width: 17, flex: '0 0 auto' }} />}
+                <Thumb sil={p.f.sil} cut={p.cut} holes={p.holes} off={p.offHoleIdx} w={p.w} l={p.l} />
+                <span onClick={() => setOpen(o => ({ ...o, [p.key]: !o[p.key] }))} style={{ flex: 1, minWidth: 0, fontSize: 12.5, cursor: 'pointer' }}>
+                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                  <span style={{ fontSize: 11, color: some ? 'var(--amber)' : 'var(--text-hint)' }}>{r1(p.l)} × {r1(p.w)} · {p.qty} шт · {box && !p.offHoleIdx.length ? 'по габариту' : some ? `убрано: ${p.off.length} из ${p.f.feats.length}` : 'по контуру'} {isOpen ? '▾' : '▸'}</span>
+                </span>
+              </div>
+              {isOpen && (
+                <div style={{ margin: '2px 0 4px 25px' }}>
+                  {p.f.feats.map(x => (
+                    <label key={x.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '2px 0', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!p.off.includes(x.id)} onChange={e => set(p.key, e.target.checked ? p.off.filter(id => id !== x.id) : [...p.off, x.id])} style={{ width: 16, height: 16, flex: '0 0 auto' }} />
+                      <span style={{ flex: 1, minWidth: 0, color: p.off.includes(x.id) ? 'var(--amber)' : 'var(--text)' }}>{x.title}</span>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{p.off.includes(x.id) ? 'потом' : 'сразу'}</span>
+                    </label>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>Галочка — резать сразу на фрезере; снята — убрать в габарит, сделать потом.</div>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

@@ -81,6 +81,7 @@ import { readOffcutsFile } from '../lib/importDetails'
 import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
 import EstimateModal from '../components/EstimateEditor'
 import ShapedPick from '../components/ShapedPick'
+import { cutSilhouette, outlineIds, shapeFeatures, offHoles as offHolesOf } from '../lib/shapeFeatures'
 // Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
 const ID_CHUNK = 100
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
@@ -736,13 +737,17 @@ function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, m
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
       ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
       ctx.lineWidth = hasCollision ? 2.5 : (isSelected ? 2.5 : atEdge ? 2 : 1.4)
-      const sil = !hasShape && p.box && details ? boxSilhouette(p, details[p.detailIndex]) : null
+      const sil = (p.box || p.cut) && details ? boxSilhouette(p, details[p.detailIndex]) : null
       if (sil) {
-        // «по габаритам»: габарит (так деталь режется) — бледно и штрихом, внутри — настоящий силуэт детали
+        // «по габаритам»: чем деталь режется (габарит или силуэт без убранного) — бледно и штрихом, поверх — настоящий силуэт
         ctx.save()
-        ctx.globalAlpha = 0.35; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1
+        ctx.globalAlpha = 0.35
+        ctx.beginPath()
+        if (hasShape) p.polygon.forEach((pt, vi) => { const sx = x + pt.x * sc, sy = y + h - pt.y * sc; if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy) })
+        else ctx.rect(x, y, w, h)
+        ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1
         if (typeof ctx.setLineDash === 'function') ctx.setLineDash([4, 3])
-        ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h)
+        ctx.lineWidth = 1; ctx.stroke()
         ctx.restore()
         ctx.beginPath()
         sil.forEach((pt, vi) => { const sx = x + pt.x * sc, sy = y + h - pt.y * sc; if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy) })
@@ -2197,7 +2202,7 @@ export default function NestingPage() {
       end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
       secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
       ...(saved ? {
-        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox || saved.boxIds?.length), boxPick: !!saved.config?.boxPick, boxIds: saved.config?.boxIds || saved.boxIds || [], strips: !!saved.config?.strips,
+        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox || Object.keys(saved.boxCut || {}).length), boxPick: !!saved.config?.boxPick, boxCut: saved.config?.boxCut || saved.boxCut || {}, strips: !!saved.config?.strips,
         status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i, offAuto: sh.offAuto ?? true })),   // сохранённые раскладки — как сохранены, без авто-обрезков
         startedAt: 0, doneAt: 0, saved: true,
       } : {}),
@@ -2487,7 +2492,7 @@ export default function NestingPage() {
       algo: useNfp ? 'nfp' : 'raster',
       byBox: ((!!cfg.box && !cfg.boxPick) || prodRectOnly) && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту (или производство режет только прямоугольники)
       // «Выборочно»: по габариту — только отмеченные фигурные детали, остальные — по контуру
-      boxIds: !!cfg.box && cfg.boxPick && !prodRectOnly && cuttingMethod !== 'guillotine' ? (cfg.boxIds || []) : null,
+      boxCut: !!cfg.box && cfg.boxPick && !prodRectOnly && cuttingMethod !== 'guillotine' ? (cfg.boxCut || {}) : null,
     }
     // β Пильный центр: свой алгоритм (src/lib/beamSawNesting.js) и свои настройки пильного центра производства —
     // выбранного в заказе, иначе своего: пропил и обрезка листа тоже свои (не «Параметры станка» пилы / фрезера);
@@ -2513,7 +2518,7 @@ export default function NestingPage() {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
       res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано
       res.byBox = !!params.byBox // фигурные детали уложены по габариту (станок режет только прямоугольники)
-      if (params.boxIds?.length) res.boxIds = params.boxIds; else delete res.boxIds   // «Выборочно»: какие детали уложены по габариту
+      if (params.boxCut && Object.keys(params.boxCut).length) res.boxCut = params.boxCut; else delete res.boxCut   // «Выборочно»: что у каких деталей убрано в габарит
       res.paramsKey = paramsKey(params) // с какими параметрами листа считали
       return res
     }
@@ -2703,34 +2708,33 @@ export default function NestingPage() {
     }))
   }
 
-  // «По габаритам» → «Выборочно»: какие фигурные детали по габариту. Меняется сразу и на готовом раскрое, без пересчёта:
-  // деталь «по габариту» → по контуру — её силуэт внутри того же габарита (соседей не задевает); по контуру → по габариту —
-  // прямоугольник габарита (если задевает соседа, на карте подсветится — тогда пересчитать)
-  function setBoxIds(cfgId, ids) {
+  // «По габаритам» → «Выборочно»: что у каких деталей убрать в габарит (boxCut: ключ детали -> убранные элементы, см.
+  // shapeFeatures.js). Меняется сразу и на готовом раскрое, без пересчёта: деталь режется силуэтом без убранного (он
+  // всегда внутри габарита). Если убранный участок раньше занимали соседи (детали сцеплены) — подсветится, пересчитать
+  function setBoxCut(cfgId, map) {
     setConfigs(cs => cs.map(c => {
       if (c.id !== cfgId) return c
-      const want = new Set((ids || []).map(String))
-      if (!c.result || !c.sheetsData?.length) return { ...c, boxIds: [...want] }
+      const next = Object.fromEntries(Object.entries(map || {}).filter(([, v]) => Array.isArray(v) && v.length))
+      if (!c.result || !c.sheetsData?.length) return { ...c, boxCut: next }
       let clash = false
       const sheetsData = c.sheetsData.map(sh => ({ ...sh, placed: sh.placed.map(p => {
         const d = details[p.detailIndex]
-        if (!d || !boxSilhouette(p, d)) return p
-        const on = want.has(boxKey(d, p.detailIndex))
-        if (on && !p.box) {
-          const q = { ...p, box: true }; delete q.polygon
-          const x1 = p.x + p.w, y1 = p.y + p.h
-          if (sh.placed.some(o => o !== p && o.x < x1 - 0.5 && o.x + o.w > p.x + 0.5 && o.y < y1 - 0.5 && o.y + o.h > p.y + 0.5)) clash = true
-          return q
-        }
-        if (!on && p.box) {
-          const q = { ...p }; delete q.box
-          q.polygon = boxSilhouette(p, d); q.rotation = placedTurns(p, d) * 90
-          return q
-        }
-        return p
+        if (!d || !shapeFeatures(d)) return p
+        const off = next[boxKey(d, p.detailIndex)] || []
+        const was = p.cut?.off || [], same = was.length === off.length && was.every(id => off.includes(id))
+        if (same && !p.box) return p
+        const q = { ...p }; delete q.box; delete q.cut; delete q.polygon
+        const W = Number(d.width) || 0, H = Number(d.length) || 0, t = placedTurns(p, d)
+        const sil = cutSilhouette(d, off)
+        const rect = !sil || (sil.length === 4 && sil.every(([x, y]) => (Math.abs(x) < 0.3 || Math.abs(x - W) < 0.3) && (Math.abs(y) < 0.3 || Math.abs(y - H) < 0.3)))
+        if (!rect) { q.polygon = sil.map(([x, y]) => rotatePointTimes(x, y, W, H, t)); q.rotation = t * 90 }
+        if (off.length) q.cut = { off: [...off], holes: offHolesOf(d, off) }
+        // убрали в габарит больше, чем было, — силуэт вырос: соседи могли лежать в убранном месте
+        if (off.some(id => !was.includes(id)) && sh.placed.some(o => o !== p && o.x < p.x + p.w - 0.5 && o.x + o.w > p.x + 0.5 && o.y < p.y + p.h - 0.5 && o.y + o.h > p.y + 0.5)) clash = true
+        return q
       }) }))
-      return { ...c, boxIds: [...want], sheetsData, saved: false, result: { ...c.result, boxIds: [...want] },
-        note: clash ? 'Габарит детали задевает соседей (сцеплена с ними по контуру) — пересчитайте раскрой' : '' }
+      return { ...c, boxCut: next, sheetsData, saved: false, result: { ...c.result, boxCut: next },
+        note: clash ? 'Убранный в габарит участок мог быть занят соседней деталью (сцеплены по контуру) — если на карте подсветилось, пересчитайте раскрой' : '' }
     }))
   }
 
@@ -2783,7 +2787,7 @@ export default function NestingPage() {
     delete result.rawSheets           // служебная копия раскладки до дозаполнения — в заказе не нужна
     const toSave = {
       ...result, sheets,
-      config: { dir: cfg.dir, box: !!cfg.box, boxPick: !!cfg.boxPick, boxIds: cfg.boxIds || [], strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
+      config: { dir: cfg.dir, box: !!cfg.box, boxPick: !!cfg.boxPick, boxCut: cfg.boxCut || {}, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
     // не сохранилось (например, предел раскроев) — дальше не идём: ни выбора, ни ЧПУ, ни отправки
@@ -3081,7 +3085,7 @@ export default function NestingPage() {
       const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
       const result = { ...cfg.result }
       delete result.rawSheets
-      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, boxPick: !!cfg.boxPick, boxIds: cfg.boxIds || [], strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
+      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, boxPick: !!cfg.boxPick, boxCut: cfg.boxCut || {}, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
       const nesting = multiMat ? JSON.stringify({ multi: true, byMat: { ...savedByMat, [matKey]: toSave } }) : JSON.stringify(toSave)
       const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
@@ -3579,9 +3583,9 @@ export default function NestingPage() {
                     ))}
                   </div>
                 )}
-                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} labelMode={labelMode} value={cfg.boxIds || []} onChange={v => setBoxIds(cfg.id, v)} />}
+                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} labelMode={labelMode} value={cfg.boxCut || {}} onChange={v => setBoxCut(cfg.id, v)} />}
                 <Hint>
-                  Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах, и фрезер режет её прямоугольником. Включите, если производство режет только прямоугольники. «Выборочно» — отметьте, какие детали по габариту (вырез потом: после кромки, на шестистороннем), остальные укладываются и режутся сразу по контуру. На бирке у всех деталей — настоящий силуэт с вырезами.
+                  Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах, и фрезер режет её прямоугольником. Включите, если производство режет только прямоугольники. «Выборочно» — у каждой фигурной детали свои элементы (скругления, косые срезы, вырезы на краю, внутренние вырезы — нажмите на деталь): галочка — резать сразу, снята — убрать в габарит и сделать потом (после кромки, на шестистороннем). Галочка у детали — весь контур по габариту. На карте и бирке — настоящий силуэт, то, чем режется, — штрихом.
                 </Hint>
               </div>
             )}
@@ -3742,9 +3746,9 @@ export default function NestingPage() {
               const cgeo = geoOf(order, cfg.result, canvasSheet)   // открытый лист (может быть обрезком)
               // раскрой «по габаритам» сделан не по габаритам (производство теперь режет только прямоугольники) — тоже пересчитать
               const wantBox = ((!!cfg.box && !cfg.boxPick) || prodRectOnly) && cuttingMethod !== 'guillotine' && hasShaped
-              const pickKey = ids => JSON.stringify([...(ids || [])].map(String).sort())
+              const pickKey = m => JSON.stringify(Object.keys(m || {}).filter(k => m[k]?.length).sort().map(k => [k, [...m[k]].sort()]))
               const wantPick = !!cfg.box && !!cfg.boxPick && !prodRectOnly && cuttingMethod !== 'guillotine' && hasShaped
-              const stalePick = !isRunning && !cfg.result.beamSaw && (wantPick ? pickKey(cfg.boxIds) !== pickKey(cfg.result.boxIds) : !!cfg.result.boxIds?.length && !wantBox)
+              const stalePick = !isRunning && !cfg.result.beamSaw && (wantPick ? pickKey(cfg.boxCut) !== pickKey(cfg.result.boxCut) : pickKey(cfg.result.boxCut) !== '[]' && !wantBox)
               const staleBox = !isRunning && wantBox && !cfg.result.byBox && !cfg.result.beamSaw
               const stale = staleBox || stalePick || (!isRunning && cfg.result.paramsKey && cfg.result.paramsKey !== curParamsKeyFor(!!cfg.result.byBox))
               return (
@@ -3948,10 +3952,11 @@ export default function NestingPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: (cfg.buffer.length || selPartObj) ? 6 : 0 }}>
                       <span style={{ fontSize: 12, fontWeight: 500, color: '#B85C00' }}>Буфер · {cfg.buffer.length}</span>
                       <div style={{ flex: 1 }} />
-                      {view === 'sheet' && selPartObj && cfg.box && cfg.boxPick && !prodRectOnly && boxSilhouette(selPartObj, details[selPartObj.detailIndex]) && (() => {
-                        const k = boxKey(details[selPartObj.detailIndex], selPartObj.detailIndex), on = (cfg.boxIds || []).map(String).includes(k)
+                      {view === 'sheet' && selPartObj && cfg.box && cfg.boxPick && !prodRectOnly && outlineIds(details[selPartObj.detailIndex]).length > 0 && (() => {
+                        const dd = details[selPartObj.detailIndex], k = boxKey(dd, selPartObj.detailIndex), all = outlineIds(dd)
+                        const cur = (cfg.boxCut || {})[k] || [], on = all.every(id => cur.includes(id))
                         return (
-                          <button onClick={() => setBoxIds(cfg.id, on ? (cfg.boxIds || []).filter(x => String(x) !== k) : [...(cfg.boxIds || []), k])}
+                          <button onClick={() => setBoxCut(cfg.id, { ...(cfg.boxCut || {}), [k]: on ? cur.filter(id => !all.includes(id)) : [...new Set([...cur, ...all])] })}
                             title="Резать эту деталь прямоугольником габарита (вырез потом) или сразу по контуру"
                             style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--blue)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                             {on ? '▭ По габариту ✓' : '▭ По габариту'}

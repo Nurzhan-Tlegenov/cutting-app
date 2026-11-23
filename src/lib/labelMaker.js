@@ -758,7 +758,7 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   // всё равно её настоящий силуэт с вырезами (сплошной), а габарит, которым её вырезали, — штрихом. Иначе рабочий
   // видит прямоугольник и думает, что деталь готова, а вырез ещё делать (на шестистороннем, после кромки и т. п.)
   let real = null
-  if (p.box && d) {
+  if ((p.box || p.cut) && d) {
     try {
       const pr = parsePolygonFromDetail({ ...d, contour: typeof d.contour === 'string' ? d.contour : c ? JSON.stringify(c) : null })
       if (pr?.custom) real = pr.polygon.map(q => (Array.isArray(q) ? R(q[0], q[1]) : R(q.x, q.y)))
