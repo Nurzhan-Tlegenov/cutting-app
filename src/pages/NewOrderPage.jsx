@@ -165,8 +165,8 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
 
         {/* Размеры */}
         <div className="det-size" data-tour="det-size" style={{ display: 'flex', gap: 3, flex: 1 }}>
-          <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} onEnter={() => widthRef.current?.focus()} hint="next" />
-          <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} inputRef={widthRef} onEnter={() => qtyRef.current?.focus()} hint="next" />
+          <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} onEnter={() => { widthRef.current?.focus(); widthRef.current?.select() }} hint="next" />
+          <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} inputRef={widthRef} onEnter={() => { qtyRef.current?.focus(); qtyRef.current?.select() }} hint="next" />
           <div style={{ width: 44, flexShrink: 0 }}>
             <NumInput value={detail.qty} placeholder="Кол"
               onChange={v => onUpdate({ ...detail, qty: v })}

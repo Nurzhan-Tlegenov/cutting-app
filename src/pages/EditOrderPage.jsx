@@ -46,12 +46,13 @@ const cleanNum = (s, decimal) => {
   const t = s.replace(',', '.').replace(/[^0-9.]/g, ''), i = t.indexOf('.')
   return i < 0 ? t : t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, '')
 }
-function NumInput({ value, onChange, placeholder, inputRef, decimal }) {
+function NumInput({ value, onChange, placeholder, inputRef, decimal, onEnter }) {
   const [raw, setRaw] = useState(null)
   const shown = raw != null && Number(raw.replace(/\.$/, '')) === Number(value) ? raw : (value ?? '')
   return (
     <input ref={inputRef} type="text" inputMode={decimal ? 'decimal' : 'numeric'} pattern={decimal ? undefined : '[0-9]*'}
-      value={shown} placeholder={placeholder} style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
+      value={shown} placeholder={placeholder} enterKeyHint={onEnter ? 'next' : 'done'} style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
+      onKeyDown={e => { if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter() } }}   // Enter (и «Далее» на телефоне): длина → ширина → кол. → новая деталь
       onChange={e => {
         const v = cleanNum(e.target.value, decimal)
         setRaw(v)
@@ -81,12 +82,12 @@ function Toggle({ on }) {
     </div>
   )
 }
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onEditContour, siblings, onCopyFrom, groupUi }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onEditContour, siblings, onCopyFrom, groupUi, onQtyEnter }) {
   // деталь из модели с подрезкой — в полях размер в раскрой (хранится готовая, см. listSize)
   const ls = listSize(detail, edgeTypes)
   const SIDES = ['Дл','Дп','Шв','Шн']
   const KEYS = ['left','right','top','bottom']
-  const lengthRef = useRef(null)
+  const lengthRef = useRef(null), widthRef = useRef(null), qtyRef = useRef(null)
   const [showCopyPicker, setShowCopyPicker] = useState(false)
   const [copySourceUid, setCopySourceUid] = useState(null)
   const [copyMirror, setCopyMirror] = useState(false)
@@ -94,7 +95,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   const [copyEdgesFlag, setCopyEdgesFlag] = useState(false)
   useEffect(() => {
     if (autoFocus && lengthRef.current) {
-      setTimeout(() => { lengthRef.current?.focus(); lengthRef.current?.select() }, 50)
+      setTimeout(() => { lengthRef.current?.focus(); lengthRef.current?.select(); lengthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, 50)
     }
   }, [autoFocus])
   const toggleEdge = (key) => {
@@ -144,10 +145,10 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
           )}
         </div>
         <div className="det-size" style={{ display: 'flex', gap: 4, flex: 1 }}>
-          <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} />
-          <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} />
+          <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} onEnter={() => { widthRef.current?.focus(); widthRef.current?.select() }} />
+          <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} inputRef={widthRef} onEnter={() => { qtyRef.current?.focus(); qtyRef.current?.select() }} />
           <div style={{ width: 44, flexShrink: 0 }}>
-            <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} />
+            <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} inputRef={qtyRef} onEnter={onQtyEnter} />
           </div>
         </div>
         {groupUi && <div className="det-chip"><GroupChip detail={detail} groups={groupUi.groups} active={groupUi.active} onChange={g => groupUi.assign(detail.uid, g)} /></div>}
@@ -649,6 +650,7 @@ export default function EditOrderPage() {
                   onRemove={() => removeDetail(d.uid)}
                   activeEdgeName={activeEdge} edgeTypes={edgeTypes} showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
+                  onQtyEnter={addDetail}
                   onEditContour={() => setEditingContourUid(d.uid)}
                   siblings={details.filter(x => x.uid !== d.uid).map(x => ({
                     uid: x.uid,
