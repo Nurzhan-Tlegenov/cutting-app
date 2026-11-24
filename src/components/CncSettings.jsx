@@ -16,7 +16,7 @@ import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEF
 import { useState, useRef, useEffect } from 'react'
 import { useDesktop } from '../hooks/useDesktop'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
+import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_SAW, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor, skipOf, SKIP_KEYS, faceToolList } from '../lib/gcode'
 import OrderList, { mergeOrder } from './OrderList'
 
@@ -83,7 +83,7 @@ function Seg({ value, options, onChange }) {
     </div>
   )
 }
-const toolLabel = t => `T${t.t} · ${t.name || (t.type === 'mill' ? 'Фреза' : 'Сверло')} Ø${r1(t.d)}`
+const toolLabel = t => `T${t.t} · ${t.name || (t.type === 'mill' ? 'Фреза' : t.type === 'saw' ? 'Пила' : 'Сверло')} ${t.type === 'saw' ? `${r1(t.sw)} мм` : `Ø${r1(t.d)}`}`
 // «Дополнять до числа символов знаком» для названия программы — как у кода детали на бирке: часть с ограничением
 // символов ({N:2}) короче заданного дополняется спереди этим знаком (лист 1 -> 01). Пусто — не дополнять
 function NamePad({ value, onChange }) {
@@ -99,9 +99,45 @@ function NamePad({ value, onChange }) {
   )
 }
 
+// Пила для пазов: толщина диска, заход, направление по осям, какие пазы берёт, своя команда перед пазом по оси
+function SawFields({ edit, e }) {
+  return (
+    <>
+      <div className="row2" style={{ marginTop: 8 }}>
+        <Num label="Толщина диска (ширина реза)" unit="мм" value={edit.sw} onChange={v => e('sw', v)} hint="Паз шире диска — несколько проходов со сдвигом" />
+        <Num label="Заход наклоном вдоль паза" unit="мм" value={edit.lead} onChange={v => e('lead', v)} hint="Пила опускается на глубину на этой длине, не вертикально" />
+      </div>
+      <div className="row2" style={{ marginTop: 8 }}>
+        <Num label="Глубина за проход" unit="мм" value={edit.maxPass ?? ''} onChange={v => e('maxPass', v)} hint="Пусто — сразу на глубину паза" />
+        <div>
+          <label className="label">Какие пазы пилит</label>
+          <Seg value={edit.axis || 'both'} options={[['both', 'X и Y'], ['x', 'по X'], ['y', 'по Y']]} onChange={v => e('axis', v)} />
+        </div>
+      </div>
+      <div className="row2" style={{ marginTop: 8 }}>
+        <div>
+          <label className="label">Паз по X — пилит в сторону</label>
+          <Seg value={edit.dirX || '-'} options={[['+', 'X+'], ['-', 'X−']]} onChange={v => e('dirX', v)} />
+        </div>
+        <div>
+          <label className="label">Паз по Y — пилит в сторону</label>
+          <Seg value={edit.dirY || '+'} options={[['+', 'Y+'], ['-', 'Y−']]} onChange={v => e('dirY', v)} />
+        </div>
+      </div>
+      <div className="row2" style={{ marginTop: 8 }}>
+        <div><label className="label">Команда перед пазом по X</label><input type="text" value={edit.cmdX || ''} placeholder="пусто — без команды" onChange={ev => e('cmdX', ev.target.value)} /></div>
+        <div><label className="label">Команда перед пазом по Y</label><input type="text" value={edit.cmdY || ''} placeholder="пусто — без команды" onChange={ev => e('cmdY', ev.target.value)} /></div>
+      </div>
+      <Hint>Пила — вторая голова станка: пилит только прямые пазы вдоль X или Y (паз под ДВП и т. п.). Назначается на слой пазов в «Обработке», как фреза. Паз шире диска — проходы со сдвигом. «Команда перед пазом» — если пилу нужно повернуть (или включить вторую пилу) своей командой станка. Если у станка две пилы — заведите две, у каждой «по X» или «по Y». Смещение пилы от шпинделя выставляется на станке. Паз, не выходящий на край детали, на конце будет дугой по радиусу диска — будет предупреждение.</Hint>
+    </>
+  )
+}
+
 function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty, compact }) {
   // maxD — диаметр отверстия: инструмент больше него выбрать нельзя
-  const list = (cnc.tools || []).filter(t => (!only || t.type === only) && (!(maxD > 0) || num(t.d) <= maxD + 0.05))
+  // only="groove" — пазы: фрезы и пилы (у пилы ограничение — толщина диска, а не диаметр)
+  const okType = t => !only || t.type === only || (only === 'groove' && (t.type === 'mill' || t.type === 'saw'))
+  const list = (cnc.tools || []).filter(t => okType(t) && (!(maxD > 0) || num(t.type === 'saw' ? t.sw : t.d) <= maxD + 0.05))
   const lost = value && value !== 'none' && !list.some(t => t.id === value)
   return (
     <select value={lost ? '' : value || ''} onChange={e => onChange(e.target.value)} style={{ ...(compact ? { padding: '2px 6px', fontSize: 12, width: '100%', height: 26 } : { padding: '8px 10px', fontSize: 14 }), borderColor: !auto && !empty && (!value || lost) ? 'var(--amber)' : undefined }}>
@@ -1157,7 +1193,7 @@ export function CncTools({ cnc, onChange }) {
   const ap = activePost(cnc)
   const ownSet = tools.length > 0 && tools.every(t => t.postId && t.postId === ap?.id)   // свои инструменты постпроцессора (см. postTools.js)
   const save = () => {
-    const t = { ...edit, name: (edit.name || '').trim() || (edit.type === 'mill' ? 'Фреза' : 'Сверло') + ' ' + r1(edit.d) + ' мм' }
+    const t = { ...edit, name: (edit.name || '').trim() || (edit.type === 'mill' ? 'Фреза ' + r1(edit.d) : edit.type === 'saw' ? 'Пила ' + r1(edit.sw) : 'Сверло ' + r1(edit.d)) + ' мм' }
     onChange({ ...cnc, tools: tools.some(x => x.id === t.id) ? tools.map(x => (x.id === t.id ? t : x)) : [...tools, t] })
     setEdit(null)
   }
@@ -1176,16 +1212,17 @@ export function CncTools({ cnc, onChange }) {
       <div className="card">
         <Title>{tools.some(t => t.id === edit.id) ? 'Инструмент' : 'Новый инструмент'}</Title>
         <label className="label">Тип</label>
-        <Seg value={edit.type} options={[['mill', 'Фреза'], ['drill', 'Сверло']]}
-          onChange={v => setEdit(x => (v === x.type ? x : { ...(v === 'mill' ? DEFAULT_MILL() : newDrill()), id: x.id, t: x.t, d: x.d, name: '' }))} />
+        <Seg value={edit.type} options={[['mill', 'Фреза'], ['drill', 'Сверло'], ['saw', 'Пила']]}
+          onChange={v => setEdit(x => (v === x.type ? x : { ...(v === 'mill' ? DEFAULT_MILL() : v === 'saw' ? DEFAULT_SAW() : newDrill()), id: x.id, t: x.t, ...(v === 'saw' ? {} : { d: x.d }), name: '' }))} />
         <div style={{ marginTop: 10 }}>
           <label className="label">1. Наименование</label>
           <input type="text" value={edit.name} placeholder={mill ? 'Компрессионная 6 мм' : 'Сверло 8 мм'} onChange={ev => e('name', ev.target.value)} />
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
           <Num label="2. Номер в магазине T" value={edit.t} onChange={v => e('t', v)} />
-          <Num label="3. Диаметр" unit="мм" value={edit.d} onChange={v => e('d', v)} />
+          <Num label={edit.type === 'saw' ? '3. Диаметр диска' : '3. Диаметр'} unit="мм" value={edit.d} onChange={v => e('d', v)} />
         </div>
+        {edit.type === 'saw' && <SawFields edit={edit} e={e} />}
         {dupT && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Номер T{edit.t} уже занят: {dupT.name}</p>}
         {mill && (
           <>
@@ -1200,7 +1237,7 @@ export function CncTools({ cnc, onChange }) {
             </div>
           </>
         )}
-        {!mill && headPost && (
+        {edit.type === 'drill' && headPost && (
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={!!edit.inHead} onChange={ev => e('inHead', ev.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
             <span>Стоит в присадочной голове<span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>{`Включается командой головы у «${headPost.name}». Без галочки — сверло в шпинделе.`}</span></span>
@@ -1210,7 +1247,7 @@ export function CncTools({ cnc, onChange }) {
           <Num label={`${mill ? 5 : 4}. Обороты шпинделя`} unit="об/мин" value={edit.rpm} onChange={v => e('rpm', v)} />
           <Num label={`${mill ? 6 : 5}. Основная подача`} unit="мм/мин" value={edit.feed} onChange={v => e('feed', v)} hint="в материале" />
         </div>
-        {!mill && (
+        {edit.type === 'drill' && (
           <>
             <div className="row2" style={{ marginTop: 8 }}>
               <Num label="6. Подача врезания" unit="мм/мин" value={edit.inFeed ?? ''} onChange={v => e('inFeed', v)} />
@@ -1251,7 +1288,7 @@ export function CncTools({ cnc, onChange }) {
   return (
     <>
       {ownSet && <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--blue-light)', borderRadius: 10, padding: '7px 10px', margin: '0 0 10px' }}>{`Инструменты постпроцессора «${ap.name}»${ap.learnedFrom ? ` — срисованы с «${ap.learnedFrom}»` : ''}. Они только у этого станка: у других постпроцессоров не видны.`}</p>}
-      {[['mill', 'Фрезы'], ['drill', 'Свёрла']].map(([type, title]) => {
+      {[['mill', 'Фрезы'], ['drill', 'Свёрла'], ['saw', 'Пилы']].map(([type, title]) => {
         const list = tools.filter(t => t.type === type).sort((a, b) => num(a.t) - num(b.t))
         return (
           <div key={type} style={{ marginBottom: 12 }}>
@@ -1263,7 +1300,7 @@ export function CncTools({ cnc, onChange }) {
                   <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 13, background: 'var(--blue-light)', color: 'var(--blue-dark)', padding: '3px 7px', borderRadius: 6 }}>T{t.t}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}{headPost && t.type === 'drill' && t.inHead ? <span style={{ fontSize: 10.5, fontWeight: 500, marginLeft: 6, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)' }}>голова</span> : null}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Ø{r1(t.d)} · {t.rpm} об/мин · подача {t.feed}{type === 'mill' ? ` · проход до ${r1(t.maxPass)} мм${num(t.edgeH) > 0 ? ` · кромка ${r1(t.edgeH)} мм` : ''}` : (num(t.inFeed) > 0 ? ` · врезание ${t.inFeed}` : '')}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{type === 'saw' ? `диск Ø${r1(t.d)} · толщина ${r1(t.sw)} · пазы ${t.axis === 'x' ? 'по X' : t.axis === 'y' ? 'по Y' : 'X и Y'} · подача ${t.feed}` : <>Ø{r1(t.d)} · {t.rpm} об/мин · подача {t.feed}{type === 'mill' ? ` · проход до ${r1(t.maxPass)} мм${num(t.edgeH) > 0 ? ` · кромка ${r1(t.edgeH)} мм` : ''}` : (num(t.inFeed) > 0 ? ` · врезание ${t.inFeed}` : '')}</>}</div>
                   </div>
                   <span style={{ color: 'var(--text-hint)' }}>›</span>
                 </div>
@@ -1560,13 +1597,13 @@ export function CncOps({ cnc, onChange, layers }) {
       <Fold id="groove" title="3. Пазы" summary={skip.grooves ? 'отключено' : [layers ? `${layers.grooves} шт.` : '', toolName(ops.groove.tool)].filter(Boolean).join(' · ') || 'авто'} style={offStyle(skip.grooves)}>
         <OffNote on={skip.grooves} />
         <label className="label">Инструмент — общий для всех пазов</label>
-        <ToolSelect cnc={cnc} only="mill" value={ops.groove.tool} onChange={v => set('groove', { tool: v })} />
+        <ToolSelect cnc={cnc} only="groove" value={ops.groove.tool} onChange={v => set('groove', { tool: v })} />
         <label className="label" style={{ marginTop: 8 }}>Вход фрезы</label>
         {Entry(ops.groove, 'straight', patch => set('groove', patch))}
         {layers?.grooveLayers?.map(l => (
           <div key={l.key} data-layer={`groove:${r1(l.width)}x${r1(l.depth)}`} style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
             <label className="label">Паз {r1(l.width)} × {r1(l.depth)} мм <span style={{ color: 'var(--text-hint)' }}>(ширина × глубина) · {l.count} шт.</span></label>
-            <ToolSelect cnc={cnc} only="mill" maxD={l.width} value={ops.grooves?.[l.key]?.tool} empty={hasTool(ops.groove.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} />
+            <ToolSelect cnc={cnc} only="groove" maxD={l.width} value={ops.grooves?.[l.key]?.tool} empty={hasTool(ops.groove.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} />
             {hasTool(grooveOpFor(ops, l.key).tool) && num((cnc.tools || []).find(t => t.id === grooveOpFor(ops, l.key).tool)?.d) > l.width + 0.05 && (
               <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Общая фреза шире этого паза — выберите фрезу для слоя.</p>
             )}
@@ -1679,7 +1716,7 @@ export function OpsQuick({ cnc, onChange, layers }) {
     const o = ops.grooves?.[l.key] || {}
     rows.push({ id: 'g' + l.key, k: 'grooves', key: l.key, title: `Паз ${r1(l.width)} × ${r1(num(o.depth) || l.depth)}`, changed: num(o.depth) ? `в детали ${r1(l.width)} × ${r1(l.depth)}` : '', count: l.count,
       miss: !hasTool(grooveOpFor(ops, l.key).tool), depthOnly: true, depth: num(o.depth) || l.depth, d0: l.depth,
-      tool: <ToolSelect compact cnc={cnc} only="mill" maxD={l.width} value={o.tool} empty={hasTool(ops.groove?.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} /> })
+      tool: <ToolSelect compact cnc={cnc} only="groove" maxD={l.width} value={o.tool} empty={hasTool(ops.groove?.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} /> })
   })
   if (!skip.pockets) layers.pockets.forEach(l => {
     const o = ops.pockets?.[l.key] || {}

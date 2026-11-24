@@ -1483,6 +1483,41 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       ...f.pockets.map(k => { const op = ops.pockets?.[pocketKey(k.depth)] || {}; return { ...k, depth: n0(op.depth) ? Math.min(T, n0(op.depth)) : k.depth, op, spiral: op.mode === 'spiral' ? (op.dir === 'ccw' ? 'ccw' : 'cw') : null, t: tool(op.tool), rank: 3, label: `выемки глубиной ${num(k.depth)}` } })]
     for (const k of rects) {
       if (!k.t) { noTool(k.label); continue }
+      // пила (вторая голова): только прямые пазы вдоль X или Y — проходы со сдвигом на ширину паза, заход наклоном вдоль паза
+      if (k.t.type === 'saw') {
+        if (k.pts || k.path || k.rank !== 2) { warn.add(`Пила «${k.t.name}» пилит только прямые пазы вдоль X или Y — ${k.label} по траектории / выемку назначьте на фрезу.`); continue }
+        const x0 = bx + k.x0, x1 = bx + k.x1, y0 = by + k.y0, y1 = by + k.y1
+        const ax = x1 - x0 >= y1 - y0 ? 'x' : 'y'
+        const fits = t => t?.type === 'saw' && (!t.axis || t.axis === 'both' || t.axis === ax)
+        const t = fits(k.t) ? k.t : (cnc.tools || []).find(fits)
+        if (!t) { warn.add(`${k.label}: паз вдоль ${ax.toUpperCase()}, а пила «${k.t.name}» пилит только вдоль ${String(k.t.axis).toUpperCase()} — второй пилы нет, пропущено.`); continue }
+        const sw = n0(t.sw) || 3.2, lo = ax === 'x' ? y0 : x0, hi = ax === 'x' ? y1 : x1, w = hi - lo
+        if (w < sw - 0.1) { warn.add(`Пила «${t.name}» (${num(sw)} мм) толще, чем ${k.label} — пропущено.`); continue }
+        const n = w <= sw + 0.05 ? 1 : Math.ceil((w - sw) / (sw * 0.9) - 1e-9) + 1
+        const offs = n === 1 ? [(lo + hi) / 2] : Array.from({ length: n }, (_, i) => lo + sw / 2 + (w - sw) * i / (n - 1))
+        const a0 = ax === 'x' ? x0 : y0, a1 = ax === 'x' ? x1 : y1
+        const fw = (ax === 'x' ? t.dirX : t.dirY) === '-' ? -1 : 1
+        const S = fw > 0 ? a0 : a1, E = fw > 0 ? a1 : a0
+        const zs = levels(T, T - Math.min(T, k.depth), n0(t.maxPass))
+        const lead = Math.max(0, n0(t.lead) || 35), feed = n0(t.feed) || 3000, inFeed = n0(t.inFeed) || feed
+        const open = k.open || {}
+        const blind = ax === 'x' ? !(open.l && open.r) : !(open.b && open.t)
+        if (blind) warn.add(`${k.label} пилой: паз не выходит на край детали с обеих сторон — на конце паз будет дугой по радиусу диска (Ø${num(t.d)}).`)
+        const pt = (a, o) => (ax === 'x' ? [a, o] : [o, a])
+        const cmd = ax === 'x' ? t.cmdX : t.cmdY
+        jobs.push({ stage: 0, rank: 2, tool: t, at: pt(S, offs[0]), run: out => {
+          if (cmd) out.raw(tpl(cmd, t))
+          for (const o of offs) for (const z of zs) {
+            const L = Math.min(lead, Math.abs(E - S)), s0 = pt(S + fw * L, o), s1 = pt(S, o), e1 = pt(E, o)
+            out.g0(s0[0], s0[1], liftZ)
+            out.g1(null, null, liftZ, inFeed)
+            out.g1(s1[0], s1[1], z, inFeed)       // наклоном назад, к началу паза
+            out.g1(e1[0], e1[1], z, feed)
+            out.g0(null, null, liftZ)
+          }
+        } })
+        continue
+      }
       if (k.t.type !== 'mill') { warn.add(`На ${k.label} назначено сверло — нужна фреза.`); continue }
       if (k.pts) {                                    // фигурная выемка или паз по траектории
         const r = n0(k.t.d) / 2, dt = n0(k.t.d)
