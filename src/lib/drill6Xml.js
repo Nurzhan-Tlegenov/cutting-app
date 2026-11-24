@@ -571,7 +571,7 @@ export const D6B_DEFAULT = () => ({
   clamp: 2,              // торец станка, у которого лапы (прижимы): Face 1 — Y макс, 2 — Y 0, 3 — X макс, 4 — X 0
   stop: 4,               // торец, у которого упор на голове
   longX: true,           // длинной стороной вдоль станка — обязательно
-  allowFlip: false,      // (больше не действует: правила деталь только поворачивают, переворот — только вручную)
+  allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх); выключено — только поворот
   order: ['zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band'],
   ruleOn: { zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false },
   bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап
@@ -668,9 +668,8 @@ export function d6Orient(d, { T, post = {}, types = {} }) {
   const order = d6bOrder(b).filter(k => d6bRuleOn(b, k))
   const W = n0(raw.width), H = n0(raw.length)
   const cands = []
-  // правила деталь только поворачивают (на 180° — длинной стороной вдоль станка), не переворачивают: этикетка всегда
-  // сверху, как на раскрое; перевернуть деталь можно только вручную (кнопки переворота по X / по Y)
-  for (const flip of [false]) {
+  // без галочки «могут перевернуть» правила деталь только поворачивают (на 180° — длинной стороной вдоль станка)
+  for (const flip of b.allowFlip ? [false, true] : [false]) {
     const base = baseOf(flip)
     for (let k = 0; k < 4; k++) {
       const turn = (base + k) % 4, f = machineFrame(W, H, turn)
