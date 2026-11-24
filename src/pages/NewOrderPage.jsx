@@ -27,7 +27,7 @@ import { detailMatKey } from '../lib/detailMaterial'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
-import EdgeTypes from '../components/EdgeTypes'
+import EdgeTypesCard from '../components/EdgeTypesCard'
 import { cutSize, listSize, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick, withoutNarrow } from '../lib/edgeCut'
 import Model3DButton from '../components/Model3DButton'
 import { fetchUserSettings, ORDER_DEFAULT_COLS, getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -721,20 +721,7 @@ export default function NewOrderPage() {
         </div>
       </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <div className="card" data-tour="order-edges" style={{ padding: '8px 12px' }}>
-          {/* всегда открыто — виды кромки видны сразу */}
-          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>
-                <span style={{ fontWeight: 500, color: edgeNames.length ? 'var(--blue)' : 'var(--text-hint)' }}>
-                  Виды кромки {edgeNames.length ? `(${edgeNames.length})` : ''}
-                </span>
-                {activeEdge && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--blue)' }}>· активная: {activeEdge}</span>}
-              </span></div>
-          <div style={{ marginTop: 8 }}>
-            <EdgeTypes edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
-          </div>
-        </div>
-      </div>
+      <EdgeTypesCard tour="order-edges" edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
 
       {/* Импорт */}
       <div data-tour="order-import">

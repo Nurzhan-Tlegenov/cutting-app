@@ -257,3 +257,6 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
   body:not(.np-show) .det-card:not(.det-phead) > .det-np { display: none !important; }
   .card.det-card.det-phead { background: transparent; border: none !important; box-shadow: none; padding-top: 0 !important; padding-bottom: 0 !important; margin-bottom: 2px !important; font-size: 11px; color: var(--text-hint); }
 }
+@media (max-width: 1099px) {
+  .card.det-card.det-head { display: none !important; }   /* таблица колонок компьютера — на телефоне свои подписи (PhoneDetailHead) */
+}
