@@ -235,3 +235,25 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
      data-full — окна, которые должны закрывать весь экран (само меню, обучение) */
   body.nav-pinned [style*="position: fixed"][style*="inset: 0"]:not([data-full]) { left: var(--nav-pin-w, 0px) !important; }
 }
+
+/* Телефон: бланк заказа — деталь в одну строку: № · длина · ширина · кол. · кромка (Дл Дп Шв Шн — нажатием) · ↻ · ✕.
+   Позиция и наименование — отдельной строкой только по кнопке «Поз. и наименование» над списком (body.np-show). */
+@media (max-width: 1099px) {
+  .det-card { display: grid !important; grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 34px auto 16px; column-gap: 4px; align-items: center; }
+  .det-card > * { grid-column: 1 / -1; }
+  .det-card > .det-row, .det-card .det-size { display: contents !important; }
+  .det-card .det-num { grid-row: 1; grid-column: 1; min-width: 0 !important; }
+  .det-card .det-num > div:first-child { font-size: 10px !important; }
+  .det-card .det-size > :nth-child(1) { grid-row: 1; grid-column: 2; }
+  .det-card .det-size > :nth-child(2) { grid-row: 1; grid-column: 3; }
+  .det-card .det-size > :nth-child(3) { grid-row: 1; grid-column: 4; width: auto !important; }
+  .det-card > .det-edges { grid-row: 1; grid-column: 5; margin-top: 0 !important; gap: 2px !important; }
+  .det-card > .det-edges > span:first-child { display: none; }
+  .det-card > .det-edges button { flex: 0 0 22px !important; width: 22px; min-width: 22px; height: 30px; padding: 0 !important; font-size: 9px !important; }
+  .det-card > .det-edges button > div:nth-child(2) { display: none; }   /* название кромки — подсказкой (долгое нажатие), сторона в кнопке */
+  .det-card .det-del { grid-row: 1; grid-column: 6; }
+  .det-card .det-chip { grid-row: 2; }
+  .det-card input { padding: 6px 2px !important; }
+  body:not(.np-show) .det-card:not(.det-phead) > .det-np { display: none !important; }
+  .card.det-card.det-phead { background: transparent; border: none !important; box-shadow: none; padding-top: 0 !important; padding-bottom: 0 !important; margin-bottom: 2px !important; font-size: 11px; color: var(--text-hint); }
+}

@@ -1,5 +1,6 @@
 import DetailTableHead from '../components/DetailTableHead'
 import DetailNamePos from '../components/DetailNamePos'
+import PhoneDetailHead, { NamePosToggle } from '../components/PhoneDetailHead'
 import Hint from '../components/Hint'
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { saveOrderNote, NOTES_SQL_HINT, saveOrderArticle, ARTICLE_SQL_HINT } from '../lib/orderNotes'
@@ -766,6 +767,7 @@ export default function NewOrderPage() {
             style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', cursor: 'pointer' }}>
             {showEdge ? 'Скрыть кромку' : 'Показать кромку'}
           </button>
+          <NamePosToggle />
         </div>
 
         {/* Вращение для всех */}
@@ -777,12 +779,7 @@ export default function NewOrderPage() {
         </div>
         <PartGroups details={details} setDetails={setDetails} active={activeGroup} onActive={setActiveGroup} extra={extraGroups} setExtra={setExtraGroups} />
 
-        {/* Заголовок колонок (на компьютере детали идут сеткой — там подписи в самих полях) */}
-        <div className="desk-hide" style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
-          <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
-          <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
-          <div style={{ width: 44, fontSize: 11, color: 'var(--text-hint)' }}>Кол.</div>
-        </div>
+        <PhoneDetailHead showEdge={showEdge} />
 
         {/* Детали сгруппированные */}
         <MaterialFilter details={details} order={matOrder} value={matFilter} onChange={setMatFilter} />
