@@ -2,6 +2,8 @@ import Hint from '../components/Hint'
 // Мастер-аккаунт: постпроцессоры по запросу — запросы производств, кому какой постпроцессор выдан,
 // кто и каким постпроцессором выпускает программы (migration_post_access.sql).
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
+import { flashFocus } from '../lib/noticeNav'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
@@ -31,8 +33,11 @@ export default function PostAccessPage() {
   const dir = useAdminDirectory(isMaster)            // кто есть кто: производство, город, постпроцессоры — под именем и в карточке
   const load = async () => { const r = await adminPostAccess(); if (r.error) { setErr(r.error); setD({ posts: [], requests: [], usage: [] }) } else { setErr(''); setD(r.data || { posts: [], requests: [], usage: [] }) } }
   useEffect(() => { Promise.resolve().then(load) }, [])
+  // пришли по уведомлению «Запрос постпроцессора» — к этому запросу
+  const focus = useLocation().state?.focus || null
+  useEffect(() => { if (focus && d) { setTab('req'); flashFocus(focus) } }, [focus, d])
   if (!isMaster) return <div className="page"><p>Раздел доступен только мастер-аккаунту.</p><BottomNav /></div>
-  const act = async p => { const r = await p; if (r?.error) window.alert(r.error); await load(); refreshAdminDirectory() }
+  const act = async p => { const r = await p; if (r?.error) window.alert(r.error); await load(); refreshAdminDirectory(); window.dispatchEvent(new Event('notices-seen')) }
   const fresh = (d?.requests || []).filter(r => r.status === 'new').length
   const tabs = [['req', `Запросы${fresh ? ` · ${fresh}` : ''}`], ['posts', `Выдача · ${d?.posts?.length || 0}`], ['usage', 'Кто чем выпускает']]
 
@@ -121,7 +126,7 @@ function Request({ r, posts, act, dir }) {
     setNotify(p?.name || '')                     // сразу — написать пользователю, что постпроцессор выдан
   }
   return (
-    <div className="card" style={{ padding: '10px 12px', border: r.status === 'new' ? '1px solid var(--blue)' : undefined, opacity: r.status === 'new' ? 1 : 0.7 }}>
+    <div className="card" data-focus={r.id} style={{ padding: '10px 12px', border: r.status === 'new' ? '1px solid var(--blue)' : undefined, opacity: r.status === 'new' ? 1 : 0.7 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 600 }}><UserName id={r.user_id} name={r.name} dir={dir} />{r.prod ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {r.prod}</span> : null}<UserLine dir={dir} id={r.user_id} style={{ fontSize: 12 }} /></span>
         {r.status !== 'new' && <span style={chip(r.status === 'done' ? 'var(--teal)' : 'var(--text-muted)', r.status === 'done' ? 'var(--teal-light)' : 'var(--bg2)')}>{r.status === 'done' ? 'выдан' : 'отклонён'}</span>}

@@ -87,7 +87,7 @@ export default function BottomNav() {
   // Уведомления: новые заявки на регистрацию (мастер), новые заявки производству, смена статуса своих заказов.
   // Пока приложение открыто — проверка раз в 45 секунд и при возвращении в него; о новом событии — плашка сверху.
   const navigate = useNavigate()
-  const [notices, setNotices] = useState({ users: 0, production: 0, orders: 0, list: [] })
+  const [notices, setNotices] = useState({ users: 0, production: 0, orders: 0, posts: 0, list: [] })
   const [toast, setToast] = useState(null)
   const known = useRef(null)                          // события, о которых уже сообщали
   useEffect(() => { if (user?.id) syncPush() }, [user?.id])   // телефон с включёнными уведомлениями — за вошедшим аккаунтом
@@ -117,7 +117,7 @@ export default function BottomNav() {
     return () => { alive = false; clearInterval(timer); clearTimeout(hide); document.removeEventListener('visibilitychange', onShow); window.removeEventListener('notices-seen', check) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isMaster])
-  useEffect(() => { setMenuBadge(notices.users + notices.production + notices.orders + unread) }, [notices, unread])
+  useEffect(() => { setMenuBadge(notices.users + notices.production + notices.orders + (notices.posts || 0) + unread) }, [notices, unread])
   const dot = n => (n > 0 ? <span style={{ position: 'absolute', top: 0, left: '50%', marginLeft: 6, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, background: 'var(--danger)', color: 'white', fontSize: 10, fontWeight: 600, lineHeight: '16px', textAlign: 'center' }}>{n > 9 ? '9+' : n}</span> : null)
   const cls = ({ isActive }) => (isActive ? 'active' : '')
   const { pathname } = useLocation()

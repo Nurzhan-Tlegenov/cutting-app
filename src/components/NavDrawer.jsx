@@ -282,12 +282,12 @@ export default function NavDrawer({ notices, unread }) {
   if (isMaster || isSupport) sections.push({ id: 'support', icon: I.headset, title: 'Поддержка', sub: isMaster ? '' : 'Вы — сотрудник поддержки', items: [
     { icon: I.inbox, label: 'Доска обращений', on: pathname.startsWith('/support'), act: () => go('/support') },
   ] })
-  if (isMaster) sections.push({ id: 'master', icon: I.crown, title: 'Мастер-аккаунт', badge: n.users || 0, items: [
+  if (isMaster) sections.push({ id: 'master', icon: I.crown, title: 'Мастер-аккаунт', badge: (n.users || 0) + (n.posts || 0), items: [
     { icon: I.users, label: 'Пользователи и регистрация', badge: n.users || 0, on: pathname === '/users', act: () => go('/users') },
     { icon: I.chart, label: 'Активность пользователей', on: pathname === '/activity', act: () => go('/activity') },
     { icon: I.globe, label: 'Заказы всех клиентов', on: pathname === '/all-orders', act: () => go('/all-orders') },
     { icon: I.factory, label: 'Заказы всех производств', on: pathname === '/all-productions', act: () => go('/all-productions') },
-    { icon: I.gear, label: 'Постпроцессоры по запросу', on: pathname === '/post-access', act: () => go('/post-access') },
+    { icon: I.gear, label: 'Постпроцессоры по запросу', badge: n.posts || 0, on: pathname === '/post-access', act: () => go('/post-access') },
     { icon: I.chart, label: 'Нагрузка', on: pathname === '/load', act: () => go('/load') },
     { icon: I.inbox, label: 'Обращения и файлы', on: false, act: () => go('/messages') },
   ] })

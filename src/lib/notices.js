@@ -44,7 +44,7 @@ export function markOrdersSeen(uid, orders) {
  *   users — сколько ждёт решения мастера; production — новых заявок производству; orders — заказов со сменившимся статусом.
  */
 export async function fetchNotices({ user, isMaster }) {
-  const res = { users: 0, production: 0, orders: 0, ownNew: 0, ownId: null, byProd: {}, list: [] }
+  const res = { users: 0, production: 0, orders: 0, posts: 0, ownNew: 0, ownId: null, byProd: {}, list: [] }
   if (!user?.id) return res
   const jobs = []
   if (isMaster) {
@@ -63,6 +63,19 @@ export async function fetchNotices({ user, isMaster }) {
       for (const r of resets) res.list.push({ key: `pw:${r.id}`, text: `Просят восстановить пароль: ${r.full_name || r.phone || '+' + r.digits}`, to: goUrl('users', `pw:${r.id}`), where: WHERE.users, src: 'users' })
       for (const u of prods) res.list.push({ key: `pd:${u.production_id}`, text: `Производство ждёт подтверждения: ${u.production_name || u.full_name || ''}`, to: goUrl('users', `pd:${u.production_id}`), where: WHERE.users, src: 'users' })
     }).catch(() => {}))
+    // запросы постпроцессоров (производство просит постпроцессор под свой станок) — ждут, пока мастер выдаст или откажет
+    jobs.push(supabase.from('post_requests').select('id,user_id,post_id,machine,controller,created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(50).then(async ({ data }) => {
+      const rows = data || []
+      res.posts = rows.length
+      if (!rows.length) return
+      const ids = [...new Set(rows.map(r => r.user_id))]
+      const { data: ps } = await supabase.from('profiles').select('id,full_name,phone').in('id', ids)
+      const who = new Map((ps || []).map(x => [x.id, x.full_name || x.phone || '']))
+      for (const r of rows) {
+        const what = [r.machine, r.controller].filter(Boolean).join(' · ') || (r.post_id ? 'постпроцессор из каталога' : 'свой станок')
+        res.list.push({ key: `pq:${r.id}`, text: `Запрос постпроцессора${who.get(r.user_id) ? ': ' + who.get(r.user_id) : ''} — ${what}`, to: goUrl('posts', r.id), where: WHERE.posts, src: 'posts' })
+      }
+    }, () => {}))
   }
   // своё производство (аккаунт — и заказчик, и производство): свои заказы на него — уведомления только на стороне
   // производства («Новая заявка»), а в кабинете заказчика о них не сообщаем — человек сам отправил и сам принял

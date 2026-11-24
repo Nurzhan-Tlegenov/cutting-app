@@ -12,6 +12,7 @@ export const WHERE = {
   work: 'Рабочее место → Мои посты',
   client: 'Клиент → Мои заказы',
   msg: 'Сообщения',
+  posts: 'Мастер-аккаунт → Постпроцессоры по запросу',
 }
 export const goUrl = (t, f, p) => `/go?t=${t}${f ? `&f=${encodeURIComponent(f)}` : ''}${p ? `&p=${encodeURIComponent(p)}` : ''}`
 export const whereOf = url => { try { return WHERE[new URL(url, window.location.origin).searchParams.get('t')] || '' } catch { return '' } }
@@ -27,6 +28,7 @@ export function resolveGo(search, setCabinet) {
   if (t === 'work') { openWorkplace(p); setKept('wTab', 'posts'); setCabinet('production'); return ['/production', { wtab: 'posts', focus: f }] }
   if (t === 'client') { setCabinet('client'); return ['/orders', { focus: f }] }
   if (t === 'msg') return ['/messages', null]
+  if (t === 'posts') return ['/post-access', { focus: f }]
   return ['/', null]
 }
 
