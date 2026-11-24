@@ -628,7 +628,8 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
           ))}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
             <Num label="Узкая деталь — уже" unit="мм" value={b.narrowW} onChange={v => setB({ narrowW: v === '' ? 100 : v })} hint="отверстия в торец к лапам" />
-            <Num label="Паз под ХДФ — до" unit="мм" value={b.hdfMaxW} onChange={v => setB({ hdfMaxW: v === '' ? 5 : v })} hint="шире — под подсветку" />
+            <Num label="Паз под ХДФ — от" unit="мм" value={b.hdfMinW} onChange={v => setB({ hdfMinW: v === '' ? 0 : v })} hint="ширина паза под заднюю стенку — от" />
+            <Num label="Паз под ХДФ — до" unit="мм" value={b.hdfMaxW} onChange={v => setB({ hdfMaxW: v === '' ? 5 : v })} hint="шире — под подсветку (снизу)" />
           </div>
         </>
       )}

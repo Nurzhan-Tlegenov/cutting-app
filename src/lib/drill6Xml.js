@@ -572,11 +572,12 @@ export const D6B_DEFAULT = () => ({
   stop: 4,               // торец, у которого упор на голове
   longX: true,           // длинной стороной вдоль станка — обязательно
   allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх); выключено — только поворот
-  order: ['zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band'],
-  ruleOn: { zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false },
+  order: ['faceHdf', 'zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band'],
+  ruleOn: { faceHdf: true, zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false },
   bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап
   narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
-  hdfMaxW: 5,            // паз в торце до этой ширины — под ХДФ (вверх), шире — под подсветку (вниз)
+  hdfMinW: 0,            // паз (в пласти и в торце) шириной от hdfMinW до hdfMaxW — под ХДФ / заднюю стенку (вверх),
+  hdfMaxW: 5,            // шире hdfMaxW — под подсветку (вниз)
   // фрезеровка (этап 3)
   blank: 'rect',         // фигурная деталь приходит: 'rect' — прямоугольником с пилы (контур не пишется, фрезеровка края — в конце), 'shape' — уже по контуру
   edgeStart: '',         // вырез на краю (гола, радиус): '' — как в «Обработке», 'far' — начинать с конца дальше от лап, 'near' — ближе
@@ -587,6 +588,7 @@ export const D6B_DEFAULT = () => ({
   grooveTool: '',        // инструмент таким пазам (имя как на станке, например несуществующая пила); пусто — как в «Обработке»
 })
 export const D6B_RULES = {
+  faceHdf: 'Пазы в пласти: под ХДФ (ширина от–до) — сверху, под подсветку (шире) — снизу',
   zs: 'Пазы в пласти (под ЗС) — сверху, подальше от лап',
   zsStop: 'Пазы в пласти (под ЗС) — подальше от упора',
   gola: 'Вырезы на краю (гола) и внешний радиус — подальше от лап',
@@ -600,6 +602,7 @@ export const D6B_RULES = {
 export const d6bOrder = b => {
   const o = (b?.order || []).filter(k => D6B_RULES[k])
   for (const [k, after] of [['zsStop', 'zs'], ['golaStop', 'gola']]) if (!o.includes(k) && o.includes(after)) o.splice(o.indexOf(after) + 1, 0, k)
+  if (!o.includes('faceHdf') && o.length) o.unshift('faceHdf')     // новое (24.11.2026) — самым важным, иначе «пазы сверху» решат за него
   return [...o, ...Object.keys(D6B_RULES).filter(k => !o.includes(k))]
 }
 export const d6bRuleOn = (b, k) => b?.ruleOn?.[k] ?? (k !== 'band')     // новое правило «кромка» — выключено, пока не включат
@@ -632,8 +635,12 @@ function ruleScores(geo, b) {
   ]
   const edgeMills = geo.mills.filter(m => m.cat === 'edge' && !m.notch)
   const narrow = Math.min(fr.L, fr.Wm) < (n0(b.narrowW) || 100)
+  // паз под ХДФ (заднюю стенку): ширина от hdfMinW до hdfMaxW; шире — под подсветку
+  const hdfW = w => w >= n0(b.hdfMinW) - 0.001 && w <= (n0(b.hdfMaxW) || 5) + 0.001
+  const faceW = geo.grooves.filter(g => n0(g.width) > 0)
   const two = geo.edgeGrooves.length >= 2
   return {
+    faceHdf: avg(faceW.map(g => ((g.face === fr.top) === hdfW(n0(g.width)) ? 1 : 0))),
     zs: avg(faceGrooves.map(g => (g.top ? 2 : 0) + far(cl, ...g.c))),
     zsStop: avg(faceGrooves.map(g => far(st, ...g.c))),
     // вырез на краю — подальше от лап; β «начинать дальше / ближе к лапам» — и чтобы фреза заходила с того конца
@@ -641,7 +648,7 @@ function ruleScores(geo, b) {
     golaStop: avg(edgeMills.map(m => far(st, ...cen(pathPts(m))))),
     edgeHoles: avg(geo.edge.map(h => (narrow ? (h.face === cl ? 1 : h.face === opp[cl] ? 0 : 0.5) : (h.face === opp[cl] ? 1 : h.face === cl ? 0 : 0.5)))),
     edgeGroove: avg(geo.edgeGrooves.map(g => (g.face === opp[cl] ? 1 : g.face === cl ? 0 : 0.5)
-      + (two ? ((g.width <= (n0(b.hdfMaxW) || 5) + 0.001) === (g.Z > T / 2) ? 1 : 0) : 0))),
+      + (two ? (hdfW(n0(g.width)) === (g.Z > T / 2) ? 1 : 0) : 0))),
     // кромка к лапам (или от лап): толще кромка — весомее
     band: (() => {
       const e = geo.edges || {}, tot = [1, 2, 3, 4].reduce((a, f) => a + (n0(e[f]) > 0 ? 1 + n0(e[f]) : 0), 0)
