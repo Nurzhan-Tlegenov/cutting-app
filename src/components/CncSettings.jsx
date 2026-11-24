@@ -615,8 +615,7 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
       {b.rules && (
         <>
           {chk('longX', 'Длинной стороной вдоль станка — обязательно')}
-          {chk('allowFlip', 'Правила могут перевернуть деталь (этикетка окажется снизу)')}
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>Правила — сверху важнее:</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>Правила — сверху важнее. Деталь по правилам только поворачивается на 180°, не переворачивается — этикетка всегда сверху; перевернуть можно вручную:</div>
           {d6bOrder(b).map((k, i, arr) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
               <input type="checkbox" checked={d6bRuleOn(b, k)} onChange={e => setB({ ruleOn: { ...(b.ruleOn || {}), [k]: e.target.checked } })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />

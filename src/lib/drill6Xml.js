@@ -571,9 +571,9 @@ export const D6B_DEFAULT = () => ({
   clamp: 2,              // торец станка, у которого лапы (прижимы): Face 1 — Y макс, 2 — Y 0, 3 — X макс, 4 — X 0
   stop: 4,               // торец, у которого упор на голове
   longX: true,           // длинной стороной вдоль станка — обязательно
-  allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх)
-  order: ['zs', 'gola', 'edgeHoles', 'edgeGroove', 'band'],
-  ruleOn: { zs: true, gola: true, edgeHoles: true, edgeGroove: true, band: false },
+  allowFlip: false,      // (больше не действует: правила деталь только поворачивают, переворот — только вручную)
+  order: ['zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band'],
+  ruleOn: { zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false },
   bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап
   narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
   hdfMaxW: 5,            // паз в торце до этой ширины — под ХДФ (вверх), шире — под подсветку (вниз)
@@ -587,14 +587,21 @@ export const D6B_DEFAULT = () => ({
   grooveTool: '',        // инструмент таким пазам (имя как на станке, например несуществующая пила); пусто — как в «Обработке»
 })
 export const D6B_RULES = {
-  zs: 'Пазы в пласти (под ЗС) — сверху, подальше от лап и от упора',
-  gola: 'Вырезы на краю (гола) и внешний радиус — подальше от лап и от упора',
+  zs: 'Пазы в пласти (под ЗС) — сверху, подальше от лап',
+  zsStop: 'Пазы в пласти (под ЗС) — подальше от упора',
+  gola: 'Вырезы на краю (гола) и внешний радиус — подальше от лап',
+  golaStop: 'Вырезы на краю (гола) и внешний радиус — подальше от упора',
   edgeHoles: 'Отверстия в торец: широкая деталь — от лап, узкая — к лапам',
   edgeGroove: 'Паз в торце — от лап; два паза — под ХДФ вверх, под подсветку вниз',
   band: 'Кромка — к лапам или от лап',
 }
 /** Порядок правил (новые правила — в конце, даже если сохранённый порядок старый) и включено ли правило */
-export const d6bOrder = b => { const o = (b?.order || []).filter(k => D6B_RULES[k]); return [...o, ...Object.keys(D6B_RULES).filter(k => !o.includes(k))] }
+// «подальше от упора» отделено от «подальше от лап» (24.11.2026): у сохранённого старого порядка оно встаёт сразу за своим правилом
+export const d6bOrder = b => {
+  const o = (b?.order || []).filter(k => D6B_RULES[k])
+  for (const [k, after] of [['zsStop', 'zs'], ['golaStop', 'gola']]) if (!o.includes(k) && o.includes(after)) o.splice(o.indexOf(after) + 1, 0, k)
+  return [...o, ...Object.keys(D6B_RULES).filter(k => !o.includes(k))]
+}
 export const d6bRuleOn = (b, k) => b?.ruleOn?.[k] ?? (k !== 'band')     // новое правило «кромка» — выключено, пока не включат
 // перевернуть деталь обратной пластью вверх (как кнопка «Перевернуть» в редакторе контура)
 function flipRaw(raw, T) {
@@ -627,9 +634,11 @@ function ruleScores(geo, b) {
   const narrow = Math.min(fr.L, fr.Wm) < (n0(b.narrowW) || 100)
   const two = geo.edgeGrooves.length >= 2
   return {
-    zs: avg(faceGrooves.map(g => (g.top ? 2 : 0) + far(cl, ...g.c) + far(st, ...g.c))),
-    // вырез на краю — подальше от лап и упора; β «начинать дальше / ближе к лапам» — и чтобы фреза заходила с того конца
-    gola: avg(edgeMills.map(m => { const c = cen(pathPts(m)); const s0 = far(cl, ...m.start); return far(cl, ...c) + far(st, ...c) + (b.edgeStart === 'far' ? s0 : b.edgeStart === 'near' ? 1 - s0 : 0) })),
+    zs: avg(faceGrooves.map(g => (g.top ? 2 : 0) + far(cl, ...g.c))),
+    zsStop: avg(faceGrooves.map(g => far(st, ...g.c))),
+    // вырез на краю — подальше от лап; β «начинать дальше / ближе к лапам» — и чтобы фреза заходила с того конца
+    gola: avg(edgeMills.map(m => { const c = cen(pathPts(m)); const s0 = far(cl, ...m.start); return far(cl, ...c) + (b.edgeStart === 'far' ? s0 : b.edgeStart === 'near' ? 1 - s0 : 0) })),
+    golaStop: avg(edgeMills.map(m => far(st, ...cen(pathPts(m))))),
     edgeHoles: avg(geo.edge.map(h => (narrow ? (h.face === cl ? 1 : h.face === opp[cl] ? 0 : 0.5) : (h.face === opp[cl] ? 1 : h.face === cl ? 0 : 0.5)))),
     edgeGroove: avg(geo.edgeGrooves.map(g => (g.face === opp[cl] ? 1 : g.face === cl ? 0 : 0.5)
       + (two ? ((g.width <= (n0(b.hdfMaxW) || 5) + 0.001) === (g.Z > T / 2) ? 1 : 0) : 0))),
@@ -659,7 +668,9 @@ export function d6Orient(d, { T, post = {}, types = {} }) {
   const order = d6bOrder(b).filter(k => d6bRuleOn(b, k))
   const W = n0(raw.width), H = n0(raw.length)
   const cands = []
-  for (const flip of b.allowFlip ? [false, true] : [false]) {
+  // правила деталь только поворачивают (на 180° — длинной стороной вдоль станка), не переворачивают: этикетка всегда
+  // сверху, как на раскрое; перевернуть деталь можно только вручную (кнопки переворота по X / по Y)
+  for (const flip of [false]) {
     const base = baseOf(flip)
     for (let k = 0; k < 4; k++) {
       const turn = (base + k) % 4, f = machineFrame(W, H, turn)
