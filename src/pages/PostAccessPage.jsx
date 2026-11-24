@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { flashFocus } from '../lib/noticeNav'
 import { useAuth } from '../context/AuthContext'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
@@ -25,7 +26,7 @@ const btn = (fg, filled) => ({ padding: '6px 11px', borderRadius: 16, border: `1
 const SUSPECT = 3          // запросов за 30 дней от одного аккаунта — подсветить
 
 export default function PostAccessPage() {
-  const { isMaster } = useAuth()
+  const { isMaster, user } = useAuth()
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [tab, setTab] = useState('req')
@@ -33,9 +34,15 @@ export default function PostAccessPage() {
   const dir = useAdminDirectory(isMaster)            // кто есть кто: производство, город, постпроцессоры — под именем и в карточке
   const load = async () => { const r = await adminPostAccess(); if (r.error) { setErr(r.error); setD({ posts: [], requests: [], usage: [] }) } else { setErr(''); setD(r.data || { posts: [], requests: [], usage: [] }) } }
   useEffect(() => { Promise.resolve().then(load) }, [])
+  // открыл запросы — все пришедшие до сих пор просмотрены: в уведомлениях и красном счётчике больше не горят
+  useEffect(() => {
+    if (!d || !isMaster) return
+    const last = (d.requests || []).map(r => String(r.created_at || '')).sort().pop() || ''
+    if (last && last > (getUserSettings(user).postReqSeen || '')) { saveUserSettings({ postReqSeen: last }, user); window.dispatchEvent(new Event('notices-seen')) }
+  }, [d, isMaster, user])
   // пришли по уведомлению «Запрос постпроцессора» — к этому запросу
   const focus = useLocation().state?.focus || null
-  useEffect(() => { if (focus && d) { setTab('req'); flashFocus(focus) } }, [focus, d])
+  useEffect(() => { if (focus && d) Promise.resolve().then(() => { setTab('req'); flashFocus(focus) }) }, [focus, d])
   if (!isMaster) return <div className="page"><p>Раздел доступен только мастер-аккаунту.</p><BottomNav /></div>
   const act = async p => { const r = await p; if (r?.error) window.alert(r.error); await load(); refreshAdminDirectory(); window.dispatchEvent(new Event('notices-seen')) }
   const fresh = (d?.requests || []).filter(r => r.status === 'new').length

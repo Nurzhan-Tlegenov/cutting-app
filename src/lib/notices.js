@@ -64,8 +64,11 @@ export async function fetchNotices({ user, isMaster }) {
       for (const u of prods) res.list.push({ key: `pd:${u.production_id}`, text: `Производство ждёт подтверждения: ${u.production_name || u.full_name || ''}`, to: goUrl('users', `pd:${u.production_id}`), where: WHERE.users, src: 'users' })
     }).catch(() => {}))
     // запросы постпроцессоров (производство просит постпроцессор под свой станок) — ждут, пока мастер выдаст или откажет
+    // горят только непросмотренные: открыл «Постпроцессоры по запросу» — все, что пришли до этого, просмотрены
+    // (postReqSeen в настройках аккаунта — одинаково на телефоне и компьютере); новые после — снова красным
+    const seenAt = getUserSettings(user).postReqSeen || ''
     jobs.push(supabase.from('post_requests').select('id,user_id,post_id,machine,controller,created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(50).then(async ({ data }) => {
-      const rows = data || []
+      const rows = (data || []).filter(r => !seenAt || String(r.created_at) > seenAt)
       res.posts = rows.length
       if (!rows.length) return
       const ids = [...new Set(rows.map(r => r.user_id))]
