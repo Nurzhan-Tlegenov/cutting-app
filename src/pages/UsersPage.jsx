@@ -20,6 +20,7 @@ import { adminPostAccess, adminUserPosts, grantPost, revokePost, setRequestStatu
 import { sendReply } from '../lib/messages'
 import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
 import { useAdminDirectory } from '../lib/adminDirectory'
+import { UserOrigin, UserName } from '../components/UserCard'
 import { COUNTRY_NAMES } from '../lib/phoneCountries'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
@@ -83,6 +84,9 @@ export default function UsersPage() {
     if (!getUserSettings(user).usersSeenAt) saveUserSettings({ usersSeenAt: new Date().toISOString() }, user)   // первый раз — новых нет
     return () => { if (newCount.current) { saveUserSettings({ usersSeenAt: new Date().toISOString() }, user); window.dispatchEvent(new Event('notices-seen')) } }
   }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  // «Кто пришёл за период»: сегодня / 2 / 7 / 30 дней / свои даты — выбор запоминается за аккаунтом
+  const [per, setPer] = useState(() => getUserSettings(user).usersPeriod || { d: '' })
+  const setPeriod = v => { setPer(v); saveUserSettings({ usersPeriod: v }, user) }
   const [kind, setKind] = useState('all')      // все / клиенты / производства
   const [land, setLand] = useState('')         // страна (обозначение) — фильтр списка
   const [town, setTown] = useState('')         // город — фильтр списка
@@ -308,6 +312,13 @@ export default function UsersPage() {
   const pct = (n, of) => (of ? Math.round(n / of * 100) : 0)
   const shown = inKind.filter(u => (!land || landOf(u) === land) && (!town || townOf(u) === town))
     .sort((a, b) => cmp(landOf(a), landOf(b)) || cmp(townOf(a), townOf(b)) || cmp(String(a.full_name || ''), String(b.full_name || ''))).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
+  // регистрации за период
+  const dayStart = n => { const t = new Date(); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - n); return t }
+  const perFrom = per.d === 'custom' ? (per.from ? new Date(per.from + 'T00:00:00') : null) : per.d ? dayStart(Number(per.d) - 1) : null
+  const perTo = per.d === 'custom' && per.to ? new Date(per.to + 'T23:59:59.999') : null
+  const inPer = u => { const t = u.created_at ? new Date(u.created_at) : null; return !!t && (!perFrom || t >= perFrom) && (!perTo || t <= perTo) }
+  const perUsers = per.d ? (users || []).filter(u => u.role !== 'admin' && inPer(u)).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))) : []
+  const perRef = perUsers.filter(u => dir?.refBy?.get(u.id)).length
   // Удалить аккаунт целиком — номер освобождается, человек регистрируется заново
   const delUser = u => {
     const who = `${u.full_name || 'без имени'}${u.phone ? ' · ' + u.phone : ''}`
@@ -368,7 +379,7 @@ export default function UsersPage() {
                         <input type="text" value={locEdit.city} onChange={e => setLocEdit({ ...locEdit, city: e.target.value })} maxLength={80} style={{ fontSize: 13, padding: '6px 8px' }} />
                       </div>
                       <button type="button" style={btn()} onClick={() => setLocEdit(null)}>Отмена</button>
-                      <button type="button" style={btn('main')} disabled={busy || !locEdit.country.trim()} onClick={() => act(() => GRANT_FEATURES.has(f) ? grantFeature(user, profile, u.id, u.full_name || u.phone || '', f, !on) : adminSetBeta(u.id, f, !on))}>Сохранить</button>
+                      <button type="button" style={btn('main')} disabled={busy || !locEdit.country.trim()} onClick={() => act(async () => { const r = await adminSetLocation(u.id, locEdit.country.trim(), locEdit.city.trim()); if (!r?.error) setLocEdit(null); return r })}>Сохранить</button>
                     </div>
                   ) : (
                     <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -471,6 +482,7 @@ export default function UsersPage() {
                       <button type="button" disabled={busy} onClick={() => delUser(u)} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11 }}>Удалить аккаунт</button>
                     </div>
                   )}
+                  {dir && <div style={{ marginTop: 6 }}><UserOrigin dir={dir} id={u.id} compact /></div>}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                     Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
                   </div>
@@ -779,6 +791,49 @@ export default function UsersPage() {
               })}
             </details>
           )}
+          <p className="section-title">Кто пришёл за период</p>
+          <div className="card" style={{ padding: '8px 10px', marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[['1', 'Сегодня'], ['2', '2 дня'], ['7', '7 дней'], ['30', '30 дней'], ['custom', 'Свои даты']].map(([d, label]) => (
+                <button key={d} type="button" onClick={() => setPeriod(per.d === d ? { d: '' } : { ...per, d })}
+                  style={{ padding: '5px 11px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${per.d === d ? 'var(--blue)' : 'var(--border-md)'}`, background: per.d === d ? 'var(--blue)' : 'transparent', color: per.d === d ? 'white' : 'var(--text)' }}>{label}</button>
+              ))}
+            </div>
+            {per.d === 'custom' && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
+                с <input type="date" value={per.from || ''} onChange={e => setPeriod({ ...per, from: e.target.value })} style={{ width: 'auto', fontSize: 13, padding: '5px 8px' }} />
+                по <input type="date" value={per.to || ''} onChange={e => setPeriod({ ...per, to: e.target.value })} style={{ width: 'auto', fontSize: 13, padding: '5px 8px' }} />
+              </div>
+            )}
+            {!per.d && <Hint>Выберите период — покажу, кто зарегистрировался, откуда пришёл, и можно сразу написать.</Hint>}
+            {per.d && (
+              <>
+                <div style={{ fontSize: 12.5, marginTop: 8, color: 'var(--text-muted)' }}>
+                  Зарегистрировались: <b style={{ color: 'var(--text)' }}>{perUsers.length}</b>
+                  {perUsers.length > 0 && <> · производств {perUsers.filter(isProd).length} · по приглашению {perRef} · сами {perUsers.length - perRef}</>}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', marginTop: 4 }}>
+                  {perUsers.map(u => {
+                    const r = dir?.refBy?.get(u.id)
+                    return (
+                      <div key={u.id} style={{ padding: '6px 0', borderTop: '0.5px solid var(--border)', fontSize: 13 }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                          <span style={{ flex: 1, minWidth: 0 }}><UserName id={u.id} name={u.full_name || u.phone || 'Без имени'} dir={dir} /></span>
+                          {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)' }}>произв.</span>}
+                          <span style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{dateTime(u.created_at)}</span>
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>
+                          {[countryCode(u.country || u.production_country), u.city || u.production_city].filter(Boolean).join(' · ')}
+                          {' · '}{r ? <>пригласил {dir?.users.get(r.ref_by)?.full_name || r.ref_by_name}</> : 'пришёл сам'}
+                          {` · заказов ${u.orders || 0}`}{u.last_sign_in_at ? ` · заходил ${date(u.last_sign_in_at)}` : ''}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
           {newUsers.length > 0 && (
             <>
               <p className="section-title" style={{ color: 'var(--teal)' }}>Новые с прошлого просмотра · {newUsers.length}</p>

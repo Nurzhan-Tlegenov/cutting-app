@@ -46,6 +46,68 @@ const chip = (fg, bg) => ({ fontSize: 11.5, padding: '2px 8px', borderRadius: 10
 const REF_KIND = { friend: 'ссылка «знакомому»', client: 'ссылка производства', production: 'ссылка для производства' }
 const KIND = { router: 'раскрой', drill6: 'присадка 6-стор.', beamsaw: 'пильный центр' }
 
+const isProdU = u => !!u?.production_id && (u.production_status ?? 'approved') === 'approved'
+const nameOf = (dir, id, fb) => dir?.users.get(id)?.full_name || fb || 'Пользователь'
+/** Как пользователь пришёл без приглашения: почта / Google или по номеру (заявка либо открытая регистрация) */
+const selfWay = u => (u?.email && !/@raskoypro\.local$/i.test(u.email) ? 'сам — через почту / Google' : 'сам — без приглашения (заявка или открытая регистрация)')
+
+/** Происхождение пользователя: кто пригласил (и кто пригласил того — цепочка), кого пригласил он сам и сколько пришло через них.
+ *  Для партнёров, которые приводят производства и клиентов. */
+export function UserOrigin({ dir, id, canWrite = true, compact = false }) {
+  const [showInv, setShowInv] = useState(false)
+  if (!dir) return null
+  const u = dir.users.get(id)
+  // цепочка вверх: пригласивший, его пригласивший… (до 5, без зацикливания)
+  const chain = []
+  for (let cur = id, seen = new Set([id]); chain.length < 5;) {
+    const r = dir.refBy?.get(cur)
+    if (!r || seen.has(r.ref_by)) break
+    chain.push(r); seen.add(r.ref_by); cur = r.ref_by
+  }
+  const invited = (dir.invited?.get(id) || []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)))
+  const second = invited.reduce((t, x) => t + (dir.invited?.get(x.user_id)?.length || 0), 0)
+  const prods = invited.filter(x => isProdU(dir.users.get(x.user_id))).length
+  const r0 = chain[0]
+  return (
+    <>
+      <div style={row}><span style={key}>Откуда пришёл</span><span style={{ flex: 1, minWidth: 0 }}>
+        {r0 ? (
+          <>
+            по приглашению <UserName id={r0.ref_by} name={nameOf(dir, r0.ref_by, r0.ref_by_name)} dir={dir} canWrite={canWrite} />
+            <span style={{ color: 'var(--text-hint)', fontSize: 12 }}> · {REF_KIND[r0.kind] || 'по ссылке'} · {date(r0.at)}</span>
+            {chain.length > 1 && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                цепочка: {chain.slice(1).map((r, i) => <span key={i}>{' ← '}<UserName id={r.ref_by} name={nameOf(dir, r.ref_by, r.ref_by_name)} dir={dir} canWrite={canWrite} /></span>)}
+                {dir.refBy?.get(chain[chain.length - 1].ref_by) ? ' ← …' : ' (пришёл сам)'}
+              </div>
+            )}
+          </>
+        ) : <span style={{ color: 'var(--text-muted)' }}>{u ? selfWay(u) : 'без приглашения'}</span>}
+      </span></div>
+      <div style={row}><span style={key}>Пригласил</span><span style={{ flex: 1, minWidth: 0 }}>
+        {!invited.length ? <span style={{ color: 'var(--text-hint)' }}>пока никого</span> : (
+          <>
+            <span role="button" tabIndex={0} onClick={() => setShowInv(v => !v)} onKeyDown={e => { if (e.key === 'Enter') setShowInv(v => !v) }}
+              style={{ cursor: 'pointer', color: 'var(--blue)' }}>
+              {invited.length} чел.{prods ? ` (производств: ${prods})` : ''} {showInv ? '▴' : '▾'}</span>
+            {second > 0 && <span style={{ color: 'var(--text-hint)', fontSize: 12 }}> · через них пришло ещё {second}</span>}
+            {(showInv || (!compact && invited.length <= 3)) && invited.map(x => {
+              const v = dir.users.get(x.user_id), more = dir.invited?.get(x.user_id)?.length || 0
+              return (
+                <div key={x.user_id} style={{ fontSize: 12.5, marginTop: 3 }}>
+                  <UserName id={x.user_id} name={nameOf(dir, x.user_id)} dir={dir} canWrite={canWrite} />
+                  {isProdU(v) && <span style={{ fontSize: 10.5, padding: '0 6px', marginLeft: 4, borderRadius: 8, background: 'var(--amber-light)', color: 'var(--amber)' }}>произв.</span>}
+                  <span style={{ color: 'var(--text-hint)' }}> · {REF_KIND[x.kind] || 'по ссылке'} · {date(x.at)}{v ? ` · заказов ${v.orders || 0}` : ''}{more ? ` · пригласил ${more}` : ''}</span>
+                </div>
+              )
+            })}
+          </>
+        )}
+      </span></div>
+    </>
+  )
+}
+
 /** Карточка пользователя (окно поверх всего, в т. ч. переписки) */
 export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }) {
   const navigate = useNavigate()
@@ -59,9 +121,6 @@ export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }
   const own = dir?.own.get(id)
   const asks = (dir?.asks.get(id) || []).filter(q => q.status === 'new')
   const usage = dir?.usage.get(id)
-  const refBy = dir?.refBy?.get(id)
-  const invited = dir?.invited?.get(id) || []
-  const [showInv, setShowInv] = useState(false)
   const openUsers = () => { onClose(); navigate(`/users?open=${id}`) }
   if (write) return <WriteToUserDialog to={{ id, name: u?.full_name || name || '' }} onClose={() => { setWrite(false); onClose() }} />
   return createPortal(
@@ -87,20 +146,7 @@ export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }
             <div style={row}><span style={key}>Страна, город</span><span>{place(u.country, u.city) || <span style={{ color: 'var(--text-hint)' }}>не указаны</span>}</span></div>
             <div style={row}><span style={key}>Роль</span><span>{u.role === 'admin' ? 'Администратор' : u.role === 'operator' ? 'Производство' : 'Клиент'}</span></div>
             <div style={row}><span style={key}>В приложении</span><span>с {date(u.created_at)} · заходил {ago(u.last_sign_in_at)}</span></div>
-            {refBy && <div style={row}><span style={key}>Пригласил</span><span style={{ flex: 1, minWidth: 0 }}>
-              <UserName id={refBy.ref_by} name={refBy.ref_by_name} dir={dir} canWrite={canWrite} />
-              <span style={{ color: 'var(--text-hint)', fontSize: 12 }}> · {REF_KIND[refBy.kind] || 'по ссылке'} · {date(refBy.at)}</span>
-            </span></div>}
-            {invited.length > 0 && <div style={row}><span style={key}>Пригласил сам</span><span style={{ flex: 1, minWidth: 0 }}>
-              <span role="button" tabIndex={0} onClick={() => setShowInv(v => !v)} onKeyDown={e => { if (e.key === 'Enter') setShowInv(v => !v) }}
-                style={{ cursor: 'pointer', color: 'var(--blue)' }}>{invited.length} чел. {showInv ? '▴' : '▾'}</span>
-              {showInv && invited.map(x => (
-                <div key={x.user_id} style={{ fontSize: 12.5, marginTop: 3 }}>
-                  <UserName id={x.user_id} name={dir.users.get(x.user_id)?.full_name || 'Пользователь'} dir={dir} canWrite={canWrite} />
-                  <span style={{ color: 'var(--text-hint)' }}> · {REF_KIND[x.kind] || 'по ссылке'} · {date(x.at)}</span>
-                </div>
-              ))}
-            </span></div>}
+            <UserOrigin dir={dir} id={id} canWrite={canWrite} />
             <div style={row}><span style={key}>Заказы</span><span>создано <b>{u.orders || 0}</b> · отправлено <b>{u.submitted || 0}</b>{u.last_order_at ? ` · последний ${ago(u.last_order_at)}` : ''}</span></div>
 
             {u.production_id && (
