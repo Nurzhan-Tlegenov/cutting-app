@@ -293,13 +293,28 @@ function segX(a, b, c, d) {
   if (t <= 1e-9 || t >= 1 - 1e-9 || u <= 1e-9 || u >= 1 - 1e-9) return null
   return [a[0] + t * r[0], a[1] + t * r[1]]
 }
+// пересечение отрезков для разбиения петель: ещё и наложение на одной прямой (эквидистанта схлопнувшейся
+// перемычки ложится на соседний отрезок) — точка в середине наложения
+function segXs(a, b, c, d) {
+  const x = segX(a, b, c, d)
+  if (x) return x
+  const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]], rr = r[0] * r[0] + r[1] * r[1]
+  if (rr < 1e-12 || Math.abs(r[0] * s[1] - r[1] * s[0]) > 1e-9 * rr) return null
+  if (Math.abs((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) > 1e-6 * Math.sqrt(rr)) return null       // не на одной прямой
+  const tc = ((c[0] - a[0]) * r[0] + (c[1] - a[1]) * r[1]) / rr, td = ((d[0] - a[0]) * r[0] + (d[1] - a[1]) * r[1]) / rr
+  const lo = Math.max(0, Math.min(tc, td)), hi = Math.min(1, Math.max(tc, td))
+  if (hi - lo < 1e-6) return null
+  const t = (lo + hi) / 2
+  if (t <= 1e-9 || t >= 1 - 1e-9) return null
+  return [a[0] + t * r[0], a[1] + t * r[1]]
+}
 // самопересекающийся контур -> простые петли
 function splitLoops(P, depth = 0) {
   const n = P.length
   if (n < 3) return []
   if (depth < 40) for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
     if (i === 0 && j === n - 1) continue
-    const x = segX(P[i], P[(i + 1) % n], P[j], P[(j + 1) % n])
+    const x = segXs(P[i], P[(i + 1) % n], P[j], P[(j + 1) % n])
     if (!x) continue
     const A = [...P.slice(0, i + 1), x, ...P.slice(j + 1)], B = [x, ...P.slice(i + 1, j + 1)]
     return [...splitLoops(dedupe(A), depth + 1), ...splitLoops(dedupe(B), depth + 1)]
@@ -347,7 +362,51 @@ export function offsetLoops(poly, delta) {
     const m = [(q[0] + L[(i + 1) % L.length][0]) / 2, (q[1] + L[(i + 1) % L.length][1]) / 2]
     return distToLoop(q, P) >= need && distToLoop(m, P) >= need && pointInPoly(m, P) === (delta < 0)
   })
-  return splitLoops(dedupe(out)).filter(ok).sort((a, b) => signedArea(b) - signedArea(a))
+  const res = splitLoops(dedupe(out)).filter(ok)
+  // внутрь: узкий «рукав» выемки (перекладина Т-образной, крестообразной) схлопывается раньше основной части — простая
+  // эквидистанта выворачивается, совпадающие отрезки не делятся, и весь контур отбрасывался: середина оставалась
+  // невыбранной (островок). Тогда — эквидистанта со схлопыванием вывернутых рёбер; берём ту, что больше по площади
+  if (delta < 0) {
+    const alt = collapseOffset(P, delta)
+    if (alt) {
+      const res2 = splitLoops(dedupe(alt)).filter(ok)
+      const area = A => A.reduce((t, L) => t + signedArea(L), 0)
+      if (area(res2) > area(res) + 1e-3) return res2.sort((a, b) => signedArea(b) - signedArea(a))
+    }
+  }
+  return res.sort((a, b) => signedArea(b) - signedArea(a))
+}
+/** Эквидистанта внутрь (P против часовой, delta < 0): рёбра, которые при сдвиге вывернулись (рукав уже 2·|delta|), убираются
+ *  по одному, соседние продлеваются до пересечения — пока все рёбра не станут прямыми. -> точки | null */
+function collapseOffset(P, delta) {
+  let E = P.map((a, i) => {
+    const b = P[(i + 1) % P.length], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1
+    const u = [dx / l, dy / l], nr = [u[1], -u[0]]
+    return { p: [a[0] + nr[0] * delta, a[1] + nr[1] * delta], u }
+  })
+  for (let it = 0; it < 2000; it++) {
+    const m = E.length
+    if (m < 3) return null
+    const V = [], bad = new Array(m).fill(0)
+    for (let i = 0; i < m; i++) {
+      const A = E[(i - 1 + m) % m], B = E[i], cr = A.u[0] * B.u[1] - A.u[1] * B.u[0]
+      if (Math.abs(cr) < 1e-9) {
+        if (A.u[0] * B.u[0] + A.u[1] * B.u[1] > 0) V.push(B.p)
+        else { V.push(B.p); bad[i] = -Infinity }               // встречные рёбра — рукав схлопнулся
+        continue
+      }
+      const t = ((B.p[0] - A.p[0]) * B.u[1] - (B.p[1] - A.p[1]) * B.u[0]) / cr
+      V.push([A.p[0] + A.u[0] * t, A.p[1] + A.u[1] * t])
+    }
+    let worst = -1, wv = -1e-9
+    for (let i = 0; i < m; i++) {
+      const a = V[i], b = V[(i + 1) % m], len = bad[i] === -Infinity ? -Infinity : (b[0] - a[0]) * E[i].u[0] + (b[1] - a[1]) * E[i].u[1]
+      if (len < wv) { wv = len; worst = i }
+    }
+    if (worst < 0) return V
+    E = E.filter((_, i) => i !== worst)
+  }
+  return null
 }
 const circleLoop = (cx, cy, r) => { const n = Math.max(24, Math.ceil(2 * Math.PI * r / 1.5)); return Array.from({ length: n }, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n)]) }
 
@@ -376,7 +435,9 @@ export function rectPaths(x0, y0, x1, y1, open, r, step, spiral = null) {
   const finish = [[cx0, cy0], [cx0, cy1], [cx1, cy1], [cx1, cy0]]         // по часовой
   if (spiral) {
     // от центра выборки к контуру: вложенные прямоугольники, каждый следующий — на шаг шире; последний — сам контур
-    const st = Math.max(0.5, Math.min(step > 0 ? step : r, 2 * r * 0.7))
+    // шаг не больше радиуса фрезы: иначе в узком месте, где следующее кольцо уже не помещается, между кольцами
+  // оставалась невыбранная полоска
+  const st = Math.max(0.5, Math.min(step > 0 ? step : r, r))
     const half = Math.min(w, h) / 2, N = Math.max(1, Math.ceil(half / st - 1e-9))
     const ring = ins => [[cx0 + ins, cy0 + ins], [cx0 + ins, cy1 - ins], [cx1 - ins, cy1 - ins], [cx1 - ins, cy0 + ins]]
     const pts = w >= h ? [[cx0 + half, cy0 + half], [cx1 - half, cy0 + half]] : [[cx0 + half, cy0 + half], [cx0 + half, cy1 - half]]
@@ -788,7 +849,9 @@ function cutRect(out, paths, zs, tool, safeZ, top, op = {}) {
 export function polyPocket(Q, r, step, dir = 'cw') {
   const fin = offsetLoops(Q, -r)
   if (!fin.length) return null
-  const st = Math.max(0.5, Math.min(step > 0 ? step : r, 2 * r * 0.7))
+  // шаг не больше радиуса фрезы: иначе в узком месте, где следующее кольцо уже не помещается, между кольцами
+  // оставалась невыбранная полоска
+  const st = Math.max(0.5, Math.min(step > 0 ? step : r, r))
   const seq = []
   const walk = (L, lvl) => {
     const kids = lvl < 800 ? offsetLoops(L, -st) : []
