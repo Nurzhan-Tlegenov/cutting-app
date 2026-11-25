@@ -153,7 +153,9 @@ function elsToMachine(els, fr) {
   })
   // угол дуги, подогнанной по точкам, чуть мимо целого (89.958° вместо 90°) — округляем: радиус выходит ровным
   const ang = v => (Math.abs(v - Math.round(v)) < 0.05 ? Math.round(v) : v)
-  return els.map(e => ({ a: fr.at(e.a[0], e.a[1]), b: fr.at(e.b[0], e.b[1]), angle: e.r ? ang((e.ccw ? -1 : 1) * e.sweep * DEG) : 0, r: e.r || 0 }))
+  // k — ключ элемента контура в координатах детали (середина хорды): не меняется при повороте / перевороте детали,
+  // по нему запоминается ручной выбор участков фрезеровки (d6Man['s:' + id] = { k: [...] })
+  return els.map(e => ({ a: fr.at(e.a[0], e.a[1]), b: fr.at(e.b[0], e.b[1]), angle: e.r ? ang((e.ccw ? -1 : 1) * e.sweep * DEG) : 0, r: e.r || 0, k: Math.round((e.a[0] + e.b[0]) / 2) + ':' + Math.round((e.a[1] + e.b[1]) / 2) }))
 }
 /**
  * Фрезеровки детали (Type 3) в координатах станка: [{ face, start, segs: [{ to, angle }], closed, depth, pocket, offset }]
@@ -340,7 +342,7 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
   const out = [], through = T + 1
   const edgeCw = set.edgeDir === 'cw', cutCcw = set.cutoutDir === 'ccw'
   const edgeLead = set.edgeLead ?? 10, notch = set.notch !== false, cutLead = set.cutoutLead ?? 20, notchOver = set.notchOver ?? 8
-  let outline = null
+  let outline = null, contour = null
   const sideOf = (els, outside) => {
     const ccw = loopArea(els) > 0
     return ccw === outside ? '右' : '左'
@@ -380,16 +382,21 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
           const t = fromEnd ? 1 - len / L : len / L, m = [e.a[0] + (e.b[0] - e.a[0]) * t, e.a[1] + (e.b[1] - e.a[1]) * t]
           return fromEnd ? { ...e, a: m } : { ...e, b: m }
         }
+        // β, вручную на детали: «смежные стороны» — какие участки контура фрезеровать. Авто (true): вырезы (улыбка, радиус
+        // угла, гола) вместе с прямыми сторонами по обе стороны от них, до углов детали — снимается припуск после пилы,
+        // вход и выход с угла. Пользователь может снять любую сторону или радиус, или взять весь периметр: { k: [ключи] }
+        const fs = set.fullSides
+        let selOf = null
+        if (fs) {
+          const auto = new Set()
+          els.forEach((e, i) => { if (cut(i)) { auto.add(i); if (!cut((i - 1 + n) % n)) auto.add((i - 1 + n) % n); if (!cut((i + 1) % n)) auto.add((i + 1) % n) } })
+          const keys = Array.isArray(fs?.k) ? new Set(fs.k) : null
+          selOf = i => (keys ? keys.has(els[i].k) : auto.has(i))
+        }
+        contour = els.map((e, i) => ({ a: e.a, b: e.b, angle: e.angle, k: e.k, cut: cut(i), sel: selOf ? selOf(i) : cut(i) }))
         const flush = () => {
           if (!run) return
-          // β, вручную на детали: «смежные стороны целиком» — вырез (улыбка, радиус угла, гола) фрезеруется вместе с прямыми
-          // участками контура по обе стороны от него, до углов детали: снимается припуск после пилы по всей стороне,
-          // вход и выход — с угла детали (за краем, по касательной), без ступеньки на выходе из выреза
-          if (set.fullSides) {
-            const i0 = (runEnd - run.length + 1 + n) % n, pi = (i0 - 1 + n) % n, ni = (runEnd + 1) % n
-            if (!cut(pi)) run = [els[pi], ...run]
-            if (!cut(ni) && ni !== pi) run = [...run, els[ni]]
-          } else if (sideLen != null && run.every(e => e.angle < 0)) {          // выпуклые дуги (контур против часовой) — внешний радиус
+          if (fs) { /* участки уже выбраны */ } else if (sideLen != null && run.every(e => e.angle < 0)) {          // выпуклые дуги (контур против часовой) — внешний радиус
             const i0 = (runEnd - run.length + 1 + n) % n, prev = els[(i0 - 1 + n) % n], next = els[(runEnd + 1) % n]
             if (!prev.angle && !cut((i0 - 1 + n) % n)) run = [part(prev, sideLen, true), ...run]
             if (!next.angle && !cut((runEnd + 1) % n)) run = [...run, part(next, sideLen, false)]
@@ -414,8 +421,15 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
           out.push({ face: fr.top, start: st, segs, closed: false, depth: through, pocket: false, offset: off, cat: 'edge' })
           run = null
         }
-        for (let k = 1; k <= n; k++) { const i = (start + k) % n; if (cut(i)) { (run ||= []).push(els[i]); runEnd = i } else flush() }
-        flush()
+        if (selOf) {
+          // выбранные участки идут цепочками; весь периметр — одной цепочкой от угла детали
+          const s0 = [...Array(n).keys()].find(i => !selOf(i))
+          if (s0 == null) { run = [...els.slice(start), ...els.slice(0, start)]; runEnd = (start - 1 + n) % n; flush() }
+          else { for (let k = 1; k <= n; k++) { const i = (s0 + k) % n; if (selOf(i)) { (run ||= []).push(els[i]); runEnd = i } else flush() } flush() }
+        } else {
+          for (let k = 1; k <= n; k++) { const i = (start + k) % n; if (cut(i)) { (run ||= []).push(els[i]); runEnd = i } else flush() }
+          flush()
+        }
       }
     }
   }
@@ -506,7 +520,7 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
       if (depth > 0) out.push({ face, start: pts[0], segs: pts.slice(1).map(to => ({ to, angle: 0 })), closed: false, depth: Math.min(depth, T), pocket: false, offset: '中', cat: 'decor' })
     }
   })
-  return { mills: out, outline }
+  return { mills: out, outline, contour }
 }
 
 // ── Инструменты и обработка шестистороннего станка (свои у каждого станка: номера инструментов у всех разные) ──
@@ -926,8 +940,8 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     edgeMills.push(m)
   })
 
-  const { mills, outline } = millPaths(raw, c, W, H, T, fr, { edgeDir: o6.ops.edge.dir, cutoutDir: o6.ops.cutout.dir, edgeLead: n0(o6.ops.edge.lead ?? 10), notch: o6.ops.edge.notch !== false, notchOver: o6.ops.edge.notchOver ?? 8, cutoutLead: n0(o6.ops.cutout.lead ?? 20),
-    ...(b6 ? { edgeStart: b6.edgeStart, clamp: n0(b6.clamp) || 2, cutEntry: b6.cutEntry, radiusSides: b6.radiusSides, fullSides: !!post.d6Man?.['s:' + raw.id] } : {}) })
+  const { mills, outline, contour } = millPaths(raw, c, W, H, T, fr, { edgeDir: o6.ops.edge.dir, cutoutDir: o6.ops.cutout.dir, edgeLead: n0(o6.ops.edge.lead ?? 10), notch: o6.ops.edge.notch !== false, notchOver: o6.ops.edge.notchOver ?? 8, cutoutLead: n0(o6.ops.cutout.lead ?? 20),
+    ...(b6 ? { edgeStart: b6.edgeStart, clamp: n0(b6.clamp) || 2, cutEntry: b6.cutEntry, radiusSides: b6.radiusSides, fullSides: post.d6Man?.['s:' + raw.id] || null } : {}) })
   const MILL_WHAT = { edge: 'фигурный край', cutout: 'вырез', pocket: 'выемка' }
   mills.forEach(m => {
     if (m.cat === 'decor') { m.tool = null; return }
@@ -1129,7 +1143,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     if (r.text == null && !post.d6All) return null
     pmsk = r.text ?? ''
   }
-  return { xml, ...(kdt != null ? { kdt } : {}), ...(scx != null ? { scx } : {}), ...(pmsk != null ? { pmsk } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
+  return { xml, ...(kdt != null ? { kdt } : {}), ...(scx != null ? { scx } : {}), ...(pmsk != null ? { pmsk } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, contour, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────

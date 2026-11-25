@@ -69,6 +69,46 @@ export function D6Scheme({ geo, clamp, stop, width = 150, maxH = 80, big = false
   )
 }
 
+// «Смежные стороны»: контур детали, как она лежит на станке; тап по стороне или радиусу — фрезеровать / не фрезеровать.
+// Выбор запоминается по детали (ключи участков в координатах детали — не сбиваются при повороте)
+function ContourPick({ geo, clamp, stop, mode, onPick, width = 300 }) {
+  const { fr, contour } = geo
+  if (!contour?.length) return null
+  const pad = 22, sc = Math.min((width - pad * 2) / fr.L, 160 / fr.Wm)
+  const w = fr.L * sc, h = fr.Wm * sc
+  const X = x => pad + x * sc, Y = y => pad + h - y * sc
+  const seg = e => {
+    if (!e.angle) return `M${X(e.a[0])},${Y(e.a[1])} L${X(e.b[0])},${Y(e.b[1])}`
+    const ch = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]), r = ch / 2 / Math.sin(Math.abs(e.angle) * Math.PI / 360)
+    // станок: angle < 0 — против часовой (вид сверху, Y вверх); на экране Y вниз — направление дуги меняется
+    return `M${X(e.a[0])},${Y(e.a[1])} A${r * sc},${r * sc} 0 ${Math.abs(e.angle) > 180 ? 1 : 0} ${e.angle < 0 ? 1 : 0} ${X(e.b[0])},${Y(e.b[1])}`
+  }
+  const keys = contour.filter(e => e.sel).map(e => e.k)
+  const toggle = k => onPick({ k: keys.includes(k) ? keys.filter(x => x !== k) : [...keys, k] })
+  const side = f => (f === 1 ? [0.5, 1, 0, 1] : f === 2 ? [0.5, 0, 0, -1] : f === 3 ? [1, 0.5, 1, 0] : [0, 0.5, -1, 0])
+  const mark = (f, d) => { const [tx, ty, ox, oy] = side(f); return [X(tx * fr.L) + ox * d, Y(ty * fr.Wm) - oy * d] }
+  const [cx, cy] = mark(clamp, 11), [sx, sy] = mark(stop, 11)
+  const chip = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid ' + (on ? 'var(--blue)' : 'var(--border-md)'), background: on ? 'var(--blue-light)' : 'var(--bg)', color: 'var(--text)', cursor: 'pointer' })
+  return (
+    <div style={{ border: '0.5px solid var(--border)', borderRadius: 10, padding: 8, margin: '6px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Что фрезеровать по контуру</div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Тап по стороне или радиусу — включить / снять. <span style={{ color: 'var(--danger)' }}>━ фрезеруется</span> · ┅ нет · ▭ лапы · <span style={{ color: 'var(--blue)' }}>▲ упор</span></div>
+      <svg width={w + pad * 2} height={h + pad * 2} style={{ display: 'block', maxWidth: '100%', touchAction: 'manipulation' }}>
+        <rect x={X(0)} y={Y(fr.Wm)} width={w} height={h} fill="var(--bg2)" stroke="none" />
+        {contour.map((e, i) => <path key={'v' + i} d={seg(e)} fill="none" stroke={e.sel ? 'var(--danger)' : 'var(--text-hint)'} strokeWidth={e.sel ? 4 : 1.5} strokeDasharray={e.sel ? '' : '4 3'} />)}
+        {contour.map((e, i) => <path key={'h' + i} d={seg(e)} fill="none" stroke="transparent" strokeWidth="18" style={{ cursor: 'pointer' }} onClick={() => toggle(e.k)} />)}
+        <text x={cx} y={cy + 4} fontSize="11" textAnchor="middle" fill="var(--text-muted)">▭▭</text>
+        <text x={sx} y={sy + 4} fontSize="11" textAnchor="middle" fill="var(--blue)">▲</text>
+      </svg>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+        <button type="button" style={chip(mode === 'auto')} onClick={() => onPick(true)}>Авто: вырезы + смежные стороны</button>
+        <button type="button" style={chip(false)} onClick={() => onPick({ k: contour.map(e => e.k) })}>Весь периметр</button>
+        <button type="button" style={chip(false)} onClick={() => onPick({ k: contour.filter(e => e.cut).map(e => e.k) })}>Только вырезы</button>
+      </div>
+    </div>
+  )
+}
+
 // Деталь крупно — тем же просмотрщиком, что XML присадки: размеры цепью / от нуля, фильтр пластей, увеличение.
 // Показывается сама программа детали (то, что уйдёт на станок), плюс лапы, упор и кромка.
 const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d } catch { return d } }
@@ -126,9 +166,12 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
   const fullOn = id => !!man['s:' + id]
   const toggleFull = id => set('s:' + id, fullOn(id) ? null : true)
   const roundOf = g => (g?.mills || []).some(m => m.cat === 'edge' && !m.notch && (m.segs || []).some(sg => sg.angle))
-  const fullBtn = (id, g) => roundOf(g) || fullOn(id)
+  const pick = (id, g) => fullOn(id) && g?.contour?.length
+    ? <ContourPick geo={g} clamp={clamp} stop={stop} mode={man['s:' + id] === true ? 'auto' : 'hand'} onPick={v => set('s:' + id, v)} width={Math.min(420, maxWidth)} />
+    : null
+  const fullBtn = (id, g) => roundOf(g) || fullOn(id) || g?.contour?.some(e => e.cut)
     ? <button type="button" style={{ ...btn, ...(fullOn(id) ? { background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' } : {}) }} onClick={() => toggleFull(id)}
-        title="Фрезеровать улыбку / радиус вместе со смежными сторонами до углов детали — снять припуск по всей стороне, вход с угла">{fullOn(id) ? '✓ Стороны целиком' : 'Смежные стороны целиком'}</button>
+        title="Фрезеровать улыбку / радиус вместе со смежными сторонами до углов детали — снять припуск по всей стороне, вход с угла. Стороны и радиусы можно снять или добавить на схеме">{fullOn(id) ? '✓ Смежные стороны (выкл.)' : 'Смежные стороны целиком'}</button>
     : null
   const roundMark = (id, g) => roundOf(g) ? <span title="Внешний радиус / улыбка — проверьте, нужны ли смежные стороны целиком" style={{ marginLeft: 4, padding: '0 5px', borderRadius: 8, fontSize: 10.5, fontWeight: 600, background: fullOn(id) ? 'var(--blue)' : 'var(--amber)', color: 'white' }}>R{fullOn(id) ? ' ✓' : ''}</span> : null
   // повернуть / перевернуть по оси станка — любую деталь, правила положения не мешают (ручное главнее)
@@ -189,6 +232,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                   {fullBtn(cur.id, g)}
                   {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(cur.id, null)}>Сброс</button>}
                 </div>
+                {pick(cur.id, g)}
                 <div ref={viewRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                   <PartXml d={cur.d} T={T} post={post} man={man} types={types} clamp={clamp} stop={stop} height={Math.max(160, vw.h)} />
                 </div>
@@ -241,6 +285,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                 </div>
               </div>
             </div>
+            {pick(id, g)}
             {big && <div style={{ marginTop: 6 }}><PartXml d={d} T={T} post={post} man={man} types={types} clamp={clamp} stop={stop} height={Math.max(300, Math.round(maxWidth * 0.8))} /><button type="button" onClick={() => setOpen(null)} style={{ ...btn, marginTop: 6 }}>Свернуть</button></div>}
           </div>
         )
