@@ -121,6 +121,16 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
     return out
   }, [mat, post, man, T, types])
   const set = (id, v) => { const next = { ...man }; if (v) next[id] = v; else delete next[id]; onMan(next) }
+  const [onlyR, setOnlyR] = useState(false)          // только детали с внешними радиусами / улыбками
+  // «смежные стороны целиком» — вручную на детали (d6Man['s:' + id]); у деталей с внешними радиусами / улыбками — значок
+  const fullOn = id => !!man['s:' + id]
+  const toggleFull = id => set('s:' + id, fullOn(id) ? null : true)
+  const roundOf = g => (g?.mills || []).some(m => m.cat === 'edge' && !m.notch && (m.segs || []).some(sg => sg.angle))
+  const fullBtn = (id, g) => roundOf(g) || fullOn(id)
+    ? <button type="button" style={{ ...btn, ...(fullOn(id) ? { background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' } : {}) }} onClick={() => toggleFull(id)}
+        title="Фрезеровать улыбку / радиус вместе со смежными сторонами до углов детали — снять припуск по всей стороне, вход с угла">{fullOn(id) ? '✓ Стороны целиком' : 'Смежные стороны целиком'}</button>
+    : null
+  const roundMark = (id, g) => roundOf(g) ? <span title="Внешний радиус / улыбка — проверьте, нужны ли смежные стороны целиком" style={{ marginLeft: 4, padding: '0 5px', borderRadius: 8, fontSize: 10.5, fontWeight: 600, background: fullOn(id) ? 'var(--blue)' : 'var(--amber)', color: 'white' }}>R{fullOn(id) ? ' ✓' : ''}</span> : null
   // повернуть / перевернуть по оси станка — любую деталь, правила положения не мешают (ручное главнее)
   const turnBtns = (id, raw, o) => {
     const go = axis => set(id, d6Turned(o, Number(raw.width) || 0, Number(raw.length) || 0, axis))
@@ -140,6 +150,14 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
   )
   const btn = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }
   const clamp = Number(b.clamp) || 2, stop = Number(b.stop) || 4
+  const nR = list.filter(x => roundOf(x.pv.geo)).length
+  const shown = onlyR ? list.filter(x => roundOf(x.pv.geo)) : list
+  const rFilter = nR > 0 ? (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '0 0 6px', cursor: 'pointer', color: 'var(--amber)' }}>
+      <input type="checkbox" checked={onlyR} onChange={e => setOnlyR(e.target.checked)} style={{ width: 16, height: 16 }} />
+      Только с радиусами / улыбками ({nR}) — проверить «Смежные стороны целиком»
+    </label>
+  ) : null
   // компьютер: слева — выбранная деталь крупно, справа — список деталей (листается сам по себе)
   const [selId, setSelId] = useState(null)
   const viewRef = useRef(null)
@@ -151,9 +169,9 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
     return () => ro.disconnect()
   }, [split])
   if (split) {
-    const cur = list.find(x => x.id === selId) || list[0] || null
-    const ci = cur ? list.indexOf(cur) : -1
-    const go = k => { const n = list[ci + k]; if (n) setSelId(n.id) }
+    const cur = shown.find(x => x.id === selId) || shown[0] || null
+    const ci = cur ? shown.indexOf(cur) : -1
+    const go = k => { const n = shown[ci + k]; if (n) setSelId(n.id) }
     const legend = <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Вид сверху. <span style={{ color: 'var(--amber)' }}>━ кромка (толщина)</span> · ▭ лапы · <span style={{ color: 'var(--blue)' }}>▲ упор</span> · ● сверху · ○ снизу · <span style={{ color: 'var(--danger)' }}>┃ в торец · ─ вырез (◯ начало)</span> · <span style={{ color: 'var(--teal)' }}>─ паз, ┅ снизу</span> · стрелки ↑↓ — следующая деталь</div>
     return (
       <div tabIndex={0} onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); go(1) } else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1) } }}
@@ -168,6 +186,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''} · сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
                   <div style={{ flex: 1 }} />
                   {turnBtns(cur.id, raw, o)}
+                  {fullBtn(cur.id, g)}
                   {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(cur.id, null)}>Сброс</button>}
                 </div>
                 <div ref={viewRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -180,12 +199,13 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
         </div>
         <div style={{ overflowY: 'auto', minHeight: 0, borderLeft: '0.5px solid var(--border)', paddingLeft: 8 }}>
           {modeSel}
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Деталей: {list.length}</div>
-          {list.map(({ id, d, pv }) => {
+          {rFilter}
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Деталей: {shown.length}</div>
+          {shown.map(({ id, d, pv }) => {
             const raw = rawDetail(d), on = cur?.id === id, o = pv.orient
             return (
               <div key={id} onClick={() => setSelId(id)} style={{ padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 2, background: on ? 'var(--blue-light)' : 'transparent', border: on ? '1px solid var(--blue)' : '1px solid transparent' }}>
-                <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(d)}</div>
+                <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(d)}{roundMark(id, pv.geo)}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{raw.length} × {raw.width}{o.how === 'manual' ? ' · вручную' : ''}{o.flip ? ' · ⇅' : ''}</div>
               </div>
             )
@@ -200,7 +220,8 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
         Вид сверху. <span style={{ color: 'var(--amber)' }}>━ кромка (толщина)</span> · ▭ лапы · <span style={{ color: 'var(--blue)' }}>▲ упор</span> · ● отверстие сверху · ○ снизу · <span style={{ color: 'var(--danger)' }}>┃ в торец · ─ вырез (◯ — начало)</span> · <span style={{ color: 'var(--teal)' }}>─ паз, ┅ снизу</span>. {desk ? '' : 'Тап по детали — крупно.'}
       </div>
       <div style={{ maxWidth: 260 }}>{modeSel}</div>
-      {list.map(({ id, d, pv }) => {
+      {rFilter}
+      {shown.map(({ id, d, pv }) => {
         const o = pv.orient, raw = rawDetail(d), big = desk || open === id
         const g = pv.geo
         return (
@@ -210,12 +231,13 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                 {!big && <D6Scheme geo={g} clamp={clamp} stop={stop} />}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div onClick={() => setOpen(big ? null : id)} style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{nameOf(d)}</div>
+                <div onClick={() => setOpen(big ? null : id)} style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{nameOf(d)}{roundMark(id, g)}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''}</div>
                 <div style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                   {turnBtns(id, raw, o)}
                   {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(id, null)}>Сброс</button>}
+                  {fullBtn(id, g)}
                 </div>
               </div>
             </div>

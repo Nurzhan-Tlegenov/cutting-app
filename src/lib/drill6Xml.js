@@ -382,7 +382,14 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
         }
         const flush = () => {
           if (!run) return
-          if (sideLen != null && run.every(e => e.angle < 0)) {          // выпуклые дуги (контур против часовой) — внешний радиус
+          // β, вручную на детали: «смежные стороны целиком» — вырез (улыбка, радиус угла, гола) фрезеруется вместе с прямыми
+          // участками контура по обе стороны от него, до углов детали: снимается припуск после пилы по всей стороне,
+          // вход и выход — с угла детали (за краем, по касательной), без ступеньки на выходе из выреза
+          if (set.fullSides) {
+            const i0 = (runEnd - run.length + 1 + n) % n, pi = (i0 - 1 + n) % n, ni = (runEnd + 1) % n
+            if (!cut(pi)) run = [els[pi], ...run]
+            if (!cut(ni) && ni !== pi) run = [...run, els[ni]]
+          } else if (sideLen != null && run.every(e => e.angle < 0)) {          // выпуклые дуги (контур против часовой) — внешний радиус
             const i0 = (runEnd - run.length + 1 + n) % n, prev = els[(i0 - 1 + n) % n], next = els[(runEnd + 1) % n]
             if (!prev.angle && !cut((i0 - 1 + n) % n)) run = [part(prev, sideLen, true), ...run]
             if (!next.angle && !cut((runEnd + 1) % n)) run = [...run, part(next, sideLen, false)]
@@ -917,7 +924,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   })
 
   const { mills, outline } = millPaths(raw, c, W, H, T, fr, { edgeDir: o6.ops.edge.dir, cutoutDir: o6.ops.cutout.dir, edgeLead: n0(o6.ops.edge.lead ?? 10), notch: o6.ops.edge.notch !== false, notchOver: o6.ops.edge.notchOver ?? 8, cutoutLead: n0(o6.ops.cutout.lead ?? 20),
-    ...(b6 ? { edgeStart: b6.edgeStart, clamp: n0(b6.clamp) || 2, cutEntry: b6.cutEntry, radiusSides: b6.radiusSides } : {}) })
+    ...(b6 ? { edgeStart: b6.edgeStart, clamp: n0(b6.clamp) || 2, cutEntry: b6.cutEntry, radiusSides: b6.radiusSides, fullSides: !!post.d6Man?.['s:' + raw.id] } : {}) })
   const MILL_WHAT = { edge: 'фигурный край', cutout: 'вырез', pocket: 'выемка' }
   mills.forEach(m => {
     if (m.cat === 'decor') { m.tool = null; return }
