@@ -579,8 +579,8 @@ export const D6B_DEFAULT = () => ({
   stop: 4,               // торец, у которого упор на голове
   longX: true,           // длинной стороной вдоль станка — обязательно
   allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх); выключено — только поворот
-  order: ['faceHdf', 'zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band'],
-  ruleOn: { faceHdf: true, zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false },
+  order: ['faceHdf', 'zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band', 'faceHoles'],
+  ruleOn: { faceHdf: true, zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false, faceHoles: true },
   bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап
   narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
   hdfMinW: 0,            // паз (в пласти и в торце) шириной от hdfMinW до hdfMaxW — под ХДФ / заднюю стенку (вверх),
@@ -596,6 +596,7 @@ export const D6B_DEFAULT = () => ({
 })
 export const D6B_RULES = {
   faceHdf: 'Пазы в пласти: под ХДФ (ширина от–до) — сверху, под подсветку (шире) — снизу',
+  faceHoles: 'Отверстия в пласти — подальше от лап (простая деталь без вырезов и пазов)',
   zs: 'Пазы в пласти (под ЗС) — сверху, подальше от лап',
   zsStop: 'Пазы в пласти (под ЗС) — подальше от упора',
   gola: 'Вырезы на краю (гола) и внешний радиус — подальше от лап',
@@ -648,6 +649,8 @@ function ruleScores(geo, b) {
   const two = geo.edgeGrooves.length >= 2
   return {
     faceHdf: avg(faceW.map(g => ((g.face === fr.top) === hdfW(n0(g.width)) ? 1 : 0))),
+    // последним по умолчанию: решает, когда остальным правилам всё равно (прямоугольник с одной присадкой по пласти)
+    faceHoles: avg([...(geo.top || []), ...(geo.bottom || [])].filter(h => isFinite(h?.X) && isFinite(h?.Y)).map(h => far(cl, h.X, h.Y))),
     zs: avg(faceGrooves.map(g => (g.top ? 2 : 0) + far(cl, ...g.c))),
     zsStop: avg(faceGrooves.map(g => far(st, ...g.c))),
     // вырез на краю — подальше от лап; β «начинать дальше / ближе к лапам» — и чтобы фреза заходила с того конца
