@@ -621,9 +621,11 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
               <input type="checkbox" checked={d6bRuleOn(b, k)} onChange={e => setB({ ruleOn: { ...(b.ruleOn || {}), [k]: e.target.checked } })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
               <span style={{ flex: 1, fontSize: 13, opacity: d6bRuleOn(b, k) ? 1 : 0.5 }}>{i + 1}. {D6B_RULES[k]}</span>
-              {k === 'band' && d6bRuleOn(b, k) && <span style={{ flex: '1 1 100%', paddingLeft: 24 }}><Seg value={b.bandClamp || 'to'} options={[['to', 'Кромкой к лапам'], ['away', 'Кромкой от лап']]} onChange={v => setB({ bandClamp: v })} /></span>}
-              <button type="button" disabled={i === 0} onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setB({ order: o }) }}
+              <button type="button" disabled={i === 0} title="Выше (важнее)" onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setB({ order: o }) }}
                 style={{ padding: '4px 9px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === 0 ? 'var(--text-hint)' : 'var(--text)' }}>↑</button>
+              <button type="button" disabled={i === arr.length - 1} title="Ниже" onClick={() => { const o = [...arr]; [o[i + 1], o[i]] = [o[i], o[i + 1]]; setB({ order: o }) }}
+                style={{ padding: '4px 9px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === arr.length - 1 ? 'var(--text-hint)' : 'var(--text)' }}>↓</button>
+              {k === 'band' && d6bRuleOn(b, k) && <span style={{ flex: '1 1 100%', paddingLeft: 24 }}><Seg value={b.bandClamp || 'to'} options={[['to', 'К лапам'], ['away', 'От лап'], ['stop', 'К упору'], ['awayStop', 'От упора']]} onChange={v => setB({ bandClamp: v })} /></span>}
             </div>
           ))}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>

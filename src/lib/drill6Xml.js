@@ -595,7 +595,7 @@ export const D6B_DEFAULT = () => ({
   allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх); выключено — только поворот
   order: ['faceHdf', 'zs', 'zsStop', 'gola', 'golaStop', 'edgeHoles', 'edgeGroove', 'band', 'faceHoles'],
   ruleOn: { faceHdf: true, zs: true, zsStop: true, gola: true, golaStop: true, edgeHoles: true, edgeGroove: true, band: false, faceHoles: true },
-  bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап
+  bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап, 'stop' — к упору, 'awayStop' — от упора
   narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
   hdfMinW: 0,            // паз (в пласти и в торце) шириной от hdfMinW до hdfMaxW — под ХДФ / заднюю стенку (вверх),
   hdfMaxW: 5,            // шире hdfMaxW — под подсветку (вниз)
@@ -617,7 +617,7 @@ export const D6B_RULES = {
   golaStop: 'Вырезы на краю (гола) и внешний радиус — подальше от упора',
   edgeHoles: 'Отверстия в торец: широкая деталь — от лап, узкая — к лапам',
   edgeGroove: 'Паз в торце — от лап; два паза — под ХДФ вверх, под подсветку вниз',
-  band: 'Кромка — к лапам или от лап',
+  band: 'Кромка — к лапам / от лап / к упору / от упора',
 }
 /** Порядок правил (новые правила — в конце, даже если сохранённый порядок старый) и включено ли правило */
 // «подальше от упора» отделено от «подальше от лап» (24.11.2026): у сохранённого старого порядка оно встаёт сразу за своим правилом
@@ -677,8 +677,10 @@ function ruleScores(geo, b) {
     band: (() => {
       const e = geo.edges || {}, tot = [1, 2, 3, 4].reduce((a, f) => a + (n0(e[f]) > 0 ? 1 + n0(e[f]) : 0), 0)
       if (!tot) return 0
-      const near = f => (f === cl ? 1 : f === opp[cl] ? 0 : 0.5)
-      return [1, 2, 3, 4].reduce((a, f) => a + (n0(e[f]) > 0 ? (1 + n0(e[f])) * (b.bandClamp === 'away' ? 1 - near(f) : near(f)) : 0), 0) / tot
+      // к лапам / от лап / к упору / от упора
+      const bc = b.bandClamp || 'to', ref = bc === 'stop' || bc === 'awayStop' ? st : cl, back = bc === 'away' || bc === 'awayStop'
+      const near = f => (f === ref ? 1 : f === opp[ref] ? 0 : 0.5)
+      return [1, 2, 3, 4].reduce((a, f) => a + (n0(e[f]) > 0 ? (1 + n0(e[f])) * (back ? 1 - near(f) : near(f)) : 0), 0) / tot
     })(),
   }
 }
