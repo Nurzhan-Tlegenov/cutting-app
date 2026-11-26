@@ -13,6 +13,7 @@ import { buildSheetGcode, partFeatures, skipOf } from '../lib/gcode'
 import { roughShapePolygons } from '../lib/trueShapeNesting'
 import { mirrorContour } from '../lib/mirrorDetail'
 import { cornerOf } from '../lib/sheetCorner'
+import { PO_RULES, poOf, poBest } from '../lib/partOrient'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import { cornerShift } from '../lib/sheetCorner'
 import { lazyRetry } from '../lib/lazyRetry'
@@ -114,8 +115,19 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   // что выводить и где деталь: как в раскрое или «к упору» со своим поворотом / переворотом (запоминается за аккаунтом)
   const [pp, setPp0] = useState(() => { const v = getUserSettings(user).partProg?.pp || {}; return { ...PP_DEFAULT, ...v, what: { ...PP_DEFAULT.what, ...(v.what || {}) } } })
   const setPp = patch => { const v = { ...pp, ...patch }; setPp0(v); setRes(null); saveUserSettings({ partProg: { ...off, name: nameQ, pp: v } }, user) }
-  const [orient, setOrient] = useState({})       // id -> { rot, flip } — положение деталей «к упору»
-  const setOr = (id, patch) => { setOrient(o => ({ ...o, [id]: { ...(o[id] || {}), ...patch } })); setRes(null) }
+  // положение деталей «к упору»: по правилам (как у шестистороннего, только вместо лап — Г-образный упор у нуля станка);
+  // поворот / переворот руками — ручное положение детали, важнее правил («Сброс» — снова по правилам)
+  const [orient, setOrient] = useState({})       // id -> { rot, flip } — ручное положение
+  const po = poOf(pp.po)
+  const autoOf = id => {
+    const h = findHit(id)
+    if (!h) return { rot: 0, flip: false }
+    const T = n0(h.mat.thickness) || 16, det = h.mat.details[h.p.detailIndex]
+    return poBest(o => ownPlace(det, T, o), T, routerPost(cnc)?.corner, po)
+  }
+  const effOf = id => orient[id] || autoOf(id)
+  const setOr = (id, patch) => { setOrient(o => ({ ...o, [id]: { ...effOf(id), ...(o[id] || {}), ...patch } })); setRes(null) }
+  const setPo = patch => setPp({ po: { ...po, ...patch } })
   const [ppOpen, setPpOpen] = useState(false)
   // у скольких выбранных деталей есть присадка (отверстия в пласть и в торец)
   const drilled = selected.filter(id => {
@@ -188,7 +200,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       if (!hit) { notes.push(`«${label}» — нет в раскрое на фрезере, программа не создана.`); continue }
       const { mat, sh } = hit
       // «к упору»: деталь в нуле станка со своим поворотом / переворотом; иначе — как в раскрое
-      const own = pp.place === 'own' ? ownPlace(mat.details[hit.p.detailIndex], n0(mat.thickness) || 16, orient[id]) : null
+      const own = pp.place === 'own' ? ownPlace(mat.details[hit.p.detailIndex], n0(mat.thickness) || 16, effOf(id)) : null
       const p = own ? own.p : hit.p, dets = own ? [own.det] : mat.details
       const pw = n0(p.origX), ph = n0(p.origY)
       const g0 = sheetGeo(order, mat.result, sh)
@@ -211,7 +223,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       for (let k = 2; used.has(name); k++) name = `${base}_${k}`
       used.add(name)
       files.push({ name: `${name}.${post.ext || 'nc'}`, data: r.text, sim: simData, time, empty: !!r.empty, label, size: `${Math.round(pw)} × ${Math.round(ph)}`, blank: `${Math.round(pw + 2 * ox)} × ${Math.round(ph + 2 * oy)}`, warnings: r.warnings || [] })
-      if (isTwoSided(row, mat.thickness)) notes.push(`«${label}» — обработка с двух сторон: в программе только ${own && orient[id]?.flip ? 'изнанка (деталь перевёрнута)' : 'лицевая сторона'}, другую сторону — отдельной программой (переверните деталь).`)
+      if (isTwoSided(row, mat.thickness)) notes.push(`«${label}» — обработка с двух сторон: в программе только ${own && effOf(id).flip ? 'изнанка (деталь перевёрнута)' : 'лицевая сторона'}, другую сторону — отдельной программой (переверните деталь).`)
     }
     setRes({ files, notes })
   }
@@ -278,24 +290,41 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
               </div>
               {pp.place === 'own' && (
                 <>
-                  <Hint>Деталь прижата к нулю станка (синяя точка) с отступом X / Y. Поверните или переверните каждую, как будете класть.</Hint>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0' }}>
-                    <button type="button" style={chip(false)} onClick={() => { setOrient(o => Object.fromEntries(selected.map(id => { const h = findHit(id), dd = h && h.mat.details[h.p.detailIndex]; return [id, { ...(o[id] || {}), rot: dd && n0(dd.width) < n0(dd.length) ? 1 : 0 }] }))); setRes(null) }}>Все длинной стороной вдоль X</button>
-                    <button type="button" style={chip(false)} onClick={() => { setOrient(o => Object.fromEntries(selected.map(id => { const h = findHit(id), dd = h && h.mat.details[h.p.detailIndex]; return [id, { ...(o[id] || {}), rot: dd && n0(dd.width) > n0(dd.length) ? 1 : 0 }] }))); setRes(null) }}>Все длинной стороной вдоль Y</button>
+                  <Hint>Деталь прижата к Г-образному упору у нуля станка (синяя точка) с отступом X / Y. Положение выбирается по правилам — сверху важнее; поворот или переворот руками — своё положение детали.</Hint>
+                  <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', margin: '4px 0 6px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, margin: '2px 0' }}>Правила положения · упоры: {(() => { const c = cornerOf(post?.corner); return `${c[0] === 'b' ? 'нижний' : 'верхний'} и ${c[1] === 'l' ? 'левый' : 'правый'}` })()}</div>
+                    {po.order.map((k, i, arr) => {
+                      const dirs = k === 'cutouts' || k === 'holes' ? [['away', 'от упоров'], ['to', 'к упорам']] : k === 'grooves' || k === 'long' ? [['x', 'X'], ['y', 'Y']] : null
+                      return (
+                        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none', opacity: k === 'faceUp' && !po.allowFlip ? 0.55 : 1 }}>
+                          <input type="checkbox" checked={!!po.on[k]} onChange={e => setPo({ on: { ...po.on, [k]: e.target.checked } })} style={{ width: 16, height: 16 }} />
+                          <span style={{ flex: 1, minWidth: 140, fontSize: 12.5 }}>{i + 1}. {PO_RULES[k]}{k === 'faceUp' && !po.allowFlip ? ' — нужен переворот' : ''}</span>
+                          {dirs && po.on[k] && dirs.map(([v, l]) => <button key={v} type="button" style={{ ...chip(po.dir[k] === v), padding: '3px 8px', fontSize: 11.5 }} onClick={() => setPo({ dir: { ...po.dir, [k]: v } })}>{l}</button>)}
+                          <button type="button" disabled={i === 0} title="Выше (важнее)" onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setPo({ order: o }) }} style={{ padding: '2px 8px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === 0 ? 'var(--text-hint)' : 'var(--text)' }}>↑</button>
+                          <button type="button" disabled={i === arr.length - 1} title="Ниже" onClick={() => { const o = [...arr]; [o[i + 1], o[i]] = [o[i], o[i + 1]]; setPo({ order: o }) }} style={{ padding: '2px 8px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === arr.length - 1 ? 'var(--text-hint)' : 'var(--text)' }}>↓</button>
+                        </div>
+                      )
+                    })}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '4px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!po.allowFlip} onChange={e => setPo({ allowFlip: e.target.checked })} style={{ width: 16, height: 16 }} />
+                      Разрешить переворот изнанкой вверх
+                    </label>
                   </div>
+                  {Object.keys(orient).some(id => selected.includes(id)) && <button type="button" style={{ ...chip(false), marginBottom: 4 }} onClick={() => { setOrient({}); setRes(null) }}>Сбросить ручное положение у всех</button>}
                   {selected.map(id => {
                     const h = findHit(id)
                     if (!h) return null
-                    const T = n0(h.mat.thickness) || 16, o = orient[id] || {}, pl = ownPlace(h.mat.details[h.p.detailIndex], T, o)
+                    const T = n0(h.mat.thickness) || 16, o = effOf(id), hand = !!orient[id], pl = ownPlace(h.mat.details[h.p.detailIndex], T, o)
                     return (
                       <div key={id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
                         <PartMini p={pl.p} det={pl.det} T={T} corner={post?.corner} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 500 }}>{nm(id)}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{Math.round(n0(pl.p.origX))} × {Math.round(n0(pl.p.origY))} · {o.flip ? 'изнанкой вверх' : 'лицом вверх'}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{Math.round(n0(pl.p.origX))} × {Math.round(n0(pl.p.origY))} · {o.flip ? 'изнанкой вверх' : 'лицом вверх'} · {hand ? <span style={{ color: 'var(--amber)' }}>вручную</span> : 'по правилам'}</div>
                           <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                             <button type="button" style={chip(false)} onClick={() => setOr(id, { rot: ((o.rot || 0) + 1) % 4 })}>⟳ 90°</button>
                             <button type="button" style={chip(!!o.flip)} onClick={() => setOr(id, { flip: !o.flip })}>⇅ Перевернуть</button>
+                            {hand && <button type="button" style={chip(false)} onClick={() => { setOrient(x => { const n = { ...x }; delete n[id]; return n }); setRes(null) }}>Сброс</button>}
                           </div>
                         </div>
                       </div>
