@@ -57,7 +57,7 @@ import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import MergePanel from '../components/MergePanel'
 import { flipDetail } from '../lib/mirrorDetail'
-import { detailMeta } from '../lib/partLabel'
+import { detailMeta, metaPos, metaDes } from '../lib/partLabel'
 import { orderTitle, orderFileName, getNextOrderNumber, fileNameOf } from '../lib/orderUtils'
 import { fileNamesOf } from '../lib/fileNames'
 import { productionLabel, sortProductions } from '../lib/productionLabel'
@@ -4600,12 +4600,14 @@ export default function NestingPage() {
               </select>
               {sortDetails(details.map((d, i) => ({ ...d, __i: i })), partsSort).map(d => {
                 const m = detailMeta(d), ed = edgeTotals([{ ...rawDetail(d), qty: 1 }], overNow)
+                // впереди — то же, что подписано на картах: позиция (режим «Позиция…») или обозначение
+                const code = labelMode === 'pos' || labelMode === 'pos_name' ? (metaPos(m) || metaDes(m)) : metaDes(m) || (labelMode === 'name' ? '' : metaPos(m))
                 return (
                   <div key={d.__i} onClick={anyRunning ? undefined : () => openPart3d(d.__i)}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: anyRunning ? 'default' : 'pointer' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {m?.des ? <span style={{ fontFamily: 'monospace', color: 'var(--text-hint)', marginRight: 6 }}>{m.des}</span> : null}{d.name || 'Деталь'}
+                        {code ? <span style={{ fontFamily: 'monospace', color: 'var(--text-hint)', marginRight: 6 }}>{code}</span> : null}{d.name || 'Деталь'}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                         {d.length}×{d.width}{ed.total > 0 ? ` · кромка ${ed.total.toFixed(2)} м${ed.curved > 0 ? ` (крив. ${ed.curved.toFixed(2)})` : ''}` : ''}

@@ -4,7 +4,7 @@
 // Программа — тем же генератором и по тем же настройкам постпроцессора и «Обработки» (в т.ч. «Выводить в УП»), что и
 // программы листов. Деталь стоит как в раскрое (тот же поворот), «лист» — заготовка «деталь + отступ с каждой стороны»:
 // обработка начинается с отступа X / Y от нуля станка. Отступы — настройка аккаунта (запоминаются).
-import { useEffect, useMemo, useRef, useState, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCnc } from '../hooks/useCnc'
@@ -30,6 +30,8 @@ import SaveFilesDialog from './SaveFilesDialog'
 import QrPartsEditor from './QrPartsEditor'
 import { labelInfo, labelQr } from '../lib/labelMaker'
 import Hint from './Hint'
+// крупная деталь — тем же просмотрщиком, что у шестистороннего (размеры цепью / от нуля, увеличение); грузится по требованию
+const Preview = lazy(() => import('./Drill6Viewer').then(m => ({ default: m.Preview })))
 
 const n0 = v => Number(String(v ?? '').replace(',', '.')) || 0
 // Имя программы детали — тем же конструктором, что QR бирки и имя файла шестистороннего (запоминается за аккаунтом).
@@ -80,6 +82,29 @@ function ownPlace(det, T, o) {
   try { polygon = roughShapePolygons(d)[rot * 90].map(([x, y]) => ({ x, y })) } catch { polygon = undefined }
   return { det: d, p: { detailIndex: 0, x: 0, y: 0, origX: pw, origY: ph, w: pw, h: ph, rotation: rot * 90, rotated: odd, label: d.name, ...(polygon ? { polygon } : {}) } }
 }
+/** Деталь на станке -> модель просмотрщика присадки (как разобранный XML): отверстия, выемки, вырезы, пазы — сверху (Face 5) */
+function panelOf(key, p, det, T) {
+  let f
+  try { f = partFeatures(p, det, T) } catch { return null }
+  const ops = []
+  const loop = pts => ({ x: pts[0][0], y: pts[0][1], segs: [...pts.slice(1), pts[0]].map(q => ({ to: q, angle: 0 })) })
+  f.holes.forEach(h => ops.push({ type: 2, face: 5, gen: true, x: h.x, y: h.y, d: h.d, depth: n0(h.depth) }))
+  f.pockets.forEach(q => ops.push({ type: 3, face: 5, gen: true, pocket: true, closed: true, depth: q.depth, ...loop(q.pts || [[q.x0, q.y0], [q.x1, q.y0], [q.x1, q.y1], [q.x0, q.y1]]) }))
+  f.cutouts.forEach(cu => {
+    const pts = cu.circle ? Array.from({ length: 36 }, (_, i) => [cu.circle.cx + cu.circle.r * Math.cos(i * Math.PI / 18), cu.circle.cy + cu.circle.r * Math.sin(i * Math.PI / 18)]) : cu.pts
+    if (pts?.length > 2) ops.push({ type: 3, face: 5, gen: true, closed: true, depth: T, ...loop(pts) })
+  })
+  f.grooves.filter(g => g.x0 != null).forEach(g => {
+    const alongX = g.x1 - g.x0 >= g.y1 - g.y0
+    ops.push(alongX ? { type: 4, face: 5, gen: true, x: g.x0, y: (g.y0 + g.y1) / 2, endX: g.x1, endY: (g.y0 + g.y1) / 2, width: g.y1 - g.y0, depth: n0(g.depth) }
+      : { type: 4, face: 5, gen: true, x: (g.x0 + g.x1) / 2, y: g.y0, endX: (g.x0 + g.x1) / 2, endY: g.y1, width: g.x1 - g.x0, depth: n0(g.depth) })
+  })
+  ops.forEach((o, i) => { o.i = i })
+  return { key, L: n0(p.origX), W: n0(p.origY), T, outline: f.outline.map(([x, y]) => ({ X: x, Y: y, R: 0 })), ops, edges: { 1: 0, 2: 0, 3: 0, 4: 0 } }
+}
+const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d } catch { return d } }
+const lsSet = (k, v) => { try { localStorage.setItem(k, v) } catch { /* без памяти */ } }
+
 /** Миниатюра: деталь как ляжет на станок, отверстия и вырезы, угол нуля (упор) */
 function PartMini({ p, det, T, corner, w = 150, h: hMax = 90, fit = false }) {
   let f
@@ -133,6 +158,8 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   const setPo = patch => setPp({ po: { ...po, ...patch } })
   const [ppOpen, setPpOpen] = useState(false)
   const [open, setOpen] = useState({ a: true, b: true })     // разделы настроек
+  const [dims, setDims0] = useState(() => { const v = lsGet('ppDims', 'chain'); return v === 'off' ? false : v })   // размеры: цепь / от нуля / нет
+  const setDims = v => { setDims0(v); lsSet('ppDims', v || 'off') }
   // во весь экран: большой просмотр детали + список деталей и настройки справа («Выбрать детали с обработкой» открывает сразу)
   const [full, setFull] = useState(false)
   const [act, setAct] = useState(null)
@@ -480,12 +507,23 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
                       </div>
                       <button type="button" onClick={() => go(1)} disabled={selected.length < 2} style={{ ...chipS(false), fontSize: 16, padding: '4px 12px' }}>›</button>
                     </div>
-                    {/* деталь вписывается в свою половину экрана (горизонтальная не уезжает под меню и под список) */}
-                    <div style={{ flex: wide ? 1 : '0 0 auto', minHeight: 0, height: wide ? 'auto' : bigH, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', overflow: 'hidden' }}>
-                      <PartMini p={v.p} det={v.det} T={v.T} corner={pp.place === 'own' ? pp.stops : 'bl'} w={bigW} h={bigH} fit />
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {[['chain', 'Цепь'], ['ord', 'От нуля'], [false, 'Без размеров']].map(([k, l]) => <button key={String(k)} type="button" style={{ ...chipS(dims === k), padding: '3px 9px', fontSize: 11.5 }} onClick={() => setDims(k)}>📏 {l}</button>)}
+                    </div>
+                    {/* деталь вписывается в свою половину экрана; размеры отверстий — как у шестистороннего; колёсико / щипок — увеличение */}
+                    <div style={{ flex: wide ? 1 : '0 0 auto', minHeight: 0, height: wide ? 'auto' : bigH, width: '100%', overflow: 'hidden' }}>
+                      {(() => {
+                        const c = cornerOf(pp.place === 'own' ? pp.stops : 'bl')
+                        const pm = panelOf(`${cur}|${v.o?.rot || 0}|${v.o?.flip ? 1 : 0}|${pp.place}`, v.p, v.det, v.T)
+                        return pm ? (
+                          <Suspense fallback={<PartMini p={v.p} det={v.det} T={v.T} corner={c} w={bigW} h={bigH} fit />}>
+                            <Preview p={pm} filter="all" sel={null} onSel={() => {}} focus={null} dims={dims} marks={pp.place === 'own' ? { stops: [c[0] === 'b' ? 2 : 1, c[1] === 'l' ? 4 : 3] } : null} />
+                          </Suspense>
+                        ) : <PartMini p={v.p} det={v.det} T={v.T} corner={c} w={bigW} h={bigH} fit />
+                      })()}
                     </div>
                     {v.o ? partBtns(cur, v.o, v.hand) : <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Поворот и переворот — в режиме «К упору — свой поворот» (справа)</div>}
-                    <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>● отверстия · ▭ выемки · пазы — синим · синяя точка — {pp.place === 'own' ? 'угол упоров' : 'ноль'}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{pp.place === 'own' ? 'синие треугольники — упоры · ' : ''}колёсико или два пальца — увеличить</div>
                   </>
                 ) : <div style={{ color: 'var(--text-hint)' }}>Нет деталей</div>}
               </div>

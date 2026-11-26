@@ -282,11 +282,15 @@ function PanelSvg({ p, filter, sel, onSel, view, upp, dims, marks = null }) {
         const sideLn = { 1: [0, 0, L, 0], 2: [0, W, L, W], 3: [L, 0, L, W], 4: [0, 0, 0, W] }, outv = { 1: [0, -1], 2: [0, 1], 3: [1, 0], 4: [-1, 0] }
         const at = (f, t, d) => { const [a1, b1, a2, b2] = sideLn[f], [ox, oy] = outv[f]; return [a1 + (a2 - a1) * t + ox * d, b1 + (b2 - b1) * t + oy * d] }
         const cf = marks.clamp, hz = cf === 1 || cf === 2, cw = px(16), chh = px(8)
-        const sf = marks.stop, [sx, sy] = at(sf, 0.5, px(9)), [ux, uy] = outv[sf], s2 = px(7)
+        // stops — Г-образный упор фрезера (две стороны), иначе один упор шестистороннего
+        const sfs = marks.stops || (marks.stop ? [marks.stop] : []), s2 = px(7)
         return (
           <g pointerEvents="none">
-            {[0.25, 0.75].map((t, i) => { const [cx, cy] = at(cf, t, px(8)); return <rect key={'cl' + i} x={cx - (hz ? cw : chh) / 2} y={cy - (hz ? chh : cw) / 2} width={hz ? cw : chh} height={hz ? chh : cw} rx={px(2)} fill="none" stroke="var(--text-muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /> })}
-            <polygon points={`${sx - ux * s2},${sy - uy * s2} ${sx + ux * s2 + uy * s2},${sy + uy * s2 + ux * s2} ${sx + ux * s2 - uy * s2},${sy + uy * s2 - ux * s2}`} fill="#2f6fd6" opacity="0.85" />
+            {cf && [0.25, 0.75].map((t, i) => { const [cx, cy] = at(cf, t, px(8)); return <rect key={'cl' + i} x={cx - (hz ? cw : chh) / 2} y={cy - (hz ? chh : cw) / 2} width={hz ? cw : chh} height={hz ? chh : cw} rx={px(2)} fill="none" stroke="var(--text-muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /> })}
+            {sfs.flatMap(sf => (marks.stops ? [0.2, 0.8] : [0.5]).map((t, i) => {
+              const [sx, sy] = at(sf, t, px(9)), [ux, uy] = outv[sf]
+              return <polygon key={sf + '-' + i} points={`${sx - ux * s2},${sy - uy * s2} ${sx + ux * s2 + uy * s2},${sy + uy * s2 + ux * s2} ${sx + ux * s2 - uy * s2},${sy + uy * s2 - ux * s2}`} fill="#2f6fd6" opacity="0.85" />
+            }))}
           </g>
         )
       })()}
