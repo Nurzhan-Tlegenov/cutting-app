@@ -46,7 +46,9 @@ function download(name, data) {
 }
 
 // Что выводить в программы деталей (поверх «Обработки»: отключённое там и так не выводится) и как резать внешний контур
-const PP_DEFAULT = { place: 'nest', outer: 'full', what: { through: true, blind: true, grooves: true, pockets: true, cutouts: true } }
+// stops — Г-образный упор для деталей «к упору»: свой угол, не угол укладки листов постпроцессора (тот — для раскроя листов)
+const STOPS = [['bl', 'Нижний и левый'], ['tl', 'Верхний и левый'], ['tr', 'Верхний и правый'], ['br', 'Нижний и правый']]
+const PP_DEFAULT = { place: 'nest', outer: 'full', stops: 'bl', what: { through: true, blind: true, grooves: true, pockets: true, cutouts: true } }
 const WHAT = [['blind', 'Глухие отверстия в пласть'], ['through', 'Сквозные отверстия'], ['grooves', 'Пазы'], ['pockets', 'Выемки'], ['cutouts', 'Внутренние вырезы']]
 const OUTER = [['full', 'Целиком'], ['shaped', 'Только фигурные участки'], ['none', 'Не резать']]
 const swapF = f => (f === 'front' ? 'back' : f === 'back' ? 'front' : f)
@@ -123,7 +125,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
     const h = findHit(id)
     if (!h) return { rot: 0, flip: false }
     const T = n0(h.mat.thickness) || 16, det = h.mat.details[h.p.detailIndex]
-    return poBest(o => ownPlace(det, T, o), T, routerPost(cnc)?.corner, po)
+    return poBest(o => ownPlace(det, T, o), T, pp.stops, po)
   }
   const effOf = id => orient[id] || autoOf(id)
   const setOr = (id, patch) => { setOrient(o => ({ ...o, [id]: { ...effOf(id), ...(o[id] || {}), ...patch } })); setRes(null) }
@@ -204,14 +206,18 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       const p = own ? own.p : hit.p, dets = own ? [own.det] : mat.details
       const pw = n0(p.origX), ph = n0(p.origY)
       const g0 = sheetGeo(order, mat.result, sh)
-      const geo = { ...g0, sheetW: pw + 2 * ox, sheetL: ph + 2 * oy, marginL: 0, marginR: 0, marginT: 0, marginB: 0, usableX: pw + 2 * ox, usableY: ph + 2 * oy, ...(own ? { corner: post.corner } : {}) }
+      // «к упору»: ноль программы — в углу упоров (своя настройка), а не в углу укладки листов; смещения нуля постпроцессора
+      // не берутся — отступ от упоров задаётся здесь же (X / Y)
+      const pst = own ? { ...post, corner: cornerOf(pp.stops), originX: 0, originY: 0 } : post
+      const cncP = own ? { ...cnc, posts: cnc.posts.map(q => (q.id === post.id ? pst : q)) } : cnc
+      const geo = { ...g0, sheetW: pw + 2 * ox, sheetL: ph + 2 * oy, marginL: 0, marginR: 0, marginT: 0, marginB: 0, usableX: pw + 2 * ox, usableY: ph + 2 * oy, ...(own ? { corner: pst.corner } : {}) }
       const sheet = { placed: [{ ...p, x: ox, y: oy }], manualOffcuts: [] }
       const skipOver = Object.fromEntries(WHAT.filter(([k]) => !pp.what[k]).map(([k]) => [k, true]))
-      const r = buildSheetGcode({ sheet, geo, details: dets, thickness: mat.thickness, cnc: { ...cnc, post: post.id }, score: false, outerMode: pp.outer, skipOver: { contour: false, ...skipOver } })
+      const r = buildSheetGcode({ sheet, geo, details: dets, thickness: mat.thickness, cnc: { ...cncP, post: post.id }, score: false, outerMode: pp.outer, skipOver: { contour: false, ...skipOver } })
       // для симулятора: заготовка и контур детали в координатах программы (как у листов на странице ЧПУ)
-      const view = postView({ ...cnc, post: post.id })
-      const z = cornerShift(post.corner, geo.sheetW, geo.sheetL)
-      const sx = n0(post.originX) + z.dx, sy = n0(post.originY) + z.dy
+      const view = postView({ ...cncP, post: post.id })
+      const z = cornerShift(pst.corner, geo.sheetW, geo.sheetL)
+      const sx = n0(pst.originX) + z.dx, sy = n0(pst.originY) + z.dy
       const outline = partFeatures(sheet.placed[0], dets[p.detailIndex], mat.thickness, skipOf(view.ops)).outline.map(([x, y]) => [sx + ox + x, sy + oy + y])
       const simData = { text: r.text, kinds: r.kinds, opIds: r.opIds, zShift: r.zShift, thickness: mat.thickness, rapid: n0(post.rapid) || 20000,
         sheet: { x: sx, y: sy, w: geo.sheetW, l: geo.sheetL }, outlines: [outline],
@@ -239,7 +245,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       {/* программы на отдельные детали — только для раскроя на фрезере (у пильного центра — только удалить) */}
       {canProg && (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 13 }}>
-        <span style={{ color: 'var(--text-muted)' }}>Отступ от нуля станка:</span>
+        <span style={{ color: 'var(--text-muted)' }}>{pp.place === 'own' ? 'Отступ от упоров:' : 'Отступ от нуля станка:'}</span>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>X <input type="text" inputMode="decimal" key={`x${off.x}`} defaultValue={off.x} onBlur={e => setO({ x: Math.max(0, n0(e.target.value)) })} style={inp} /> мм</label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Y <input type="text" inputMode="decimal" key={`y${off.y}`} defaultValue={off.y} onBlur={e => setO({ y: Math.max(0, n0(e.target.value)) })} style={inp} /> мм</label>
       </div>
@@ -269,7 +275,6 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
           <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{pp.place === 'own' ? 'к упору' : 'как в раскрое'} · контур: {OUTER.find(o => o[0] === pp.outer)?.[1].toLowerCase()}{WHAT.some(([k]) => !pp.what[k]) ? ' · есть отключённое' : ''}</span>
         </div>
         {ppOpen && (() => {
-          const post = routerPost(cnc)
           const chip = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text)' })
           return (
             <div style={{ marginTop: 8, fontSize: 13 }}>
@@ -290,9 +295,12 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
               </div>
               {pp.place === 'own' && (
                 <>
-                  <Hint>Деталь прижата к Г-образному упору у нуля станка (синяя точка) с отступом X / Y. Положение выбирается по правилам — сверху важнее; поворот или переворот руками — своё положение детали.</Hint>
+                  <Hint>Деталь прижата к Г-образному упору (синяя точка — его угол) с отступом X / Y. Положение выбирается по правилам — сверху важнее; поворот или переворот руками — своё положение детали.</Hint>
                   <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', margin: '4px 0 6px' }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, margin: '2px 0' }}>Правила положения · упоры: {(() => { const c = cornerOf(post?.corner); return `${c[0] === 'b' ? 'нижний' : 'верхний'} и ${c[1] === 'l' ? 'левый' : 'правый'}` })()}</div>
+                    <div style={{ fontSize: 12, fontWeight: 500, margin: '2px 0' }}>Упоры (Г-образный) — где они у станка</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>{STOPS.map(([k, l]) => <button key={k} type="button" style={{ ...chip(cornerOf(pp.stops) === k), padding: '3px 9px', fontSize: 11.5 }} onClick={() => setPp({ stops: k })}>{l}</button>)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Ноль программы — в углу упоров. Своя настройка: угол укладки листов в постпроцессоре не меняется.</div>
+                    <div style={{ fontSize: 12, fontWeight: 500, margin: '6px 0 2px' }}>Правила положения</div>
                     {po.order.map((k, i, arr) => {
                       const dirs = k === 'cutouts' || k === 'holes' ? [['away', 'от упоров'], ['to', 'к упорам']] : k === 'grooves' || k === 'long' ? [['x', 'X'], ['y', 'Y']] : null
                       return (
@@ -317,7 +325,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
                     const T = n0(h.mat.thickness) || 16, o = effOf(id), hand = !!orient[id], pl = ownPlace(h.mat.details[h.p.detailIndex], T, o)
                     return (
                       <div key={id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
-                        <PartMini p={pl.p} det={pl.det} T={T} corner={post?.corner} />
+                        <PartMini p={pl.p} det={pl.det} T={T} corner={pp.stops} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 500 }}>{nm(id)}</div>
                           <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{Math.round(n0(pl.p.origX))} × {Math.round(n0(pl.p.origY))} · {o.flip ? 'изнанкой вверх' : 'лицом вверх'} · {hand ? <span style={{ color: 'var(--amber)' }}>вручную</span> : 'по правилам'}</div>
