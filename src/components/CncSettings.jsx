@@ -229,7 +229,8 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
         )}
         <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие для раскроечных станков.</Hint>
       </div>
-      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} used={drillPosts(cnc).some(p => p.id === post.id)} orderCtx={orderCtx} />}
+      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} used={drillPosts(cnc).some(p => p.id === post.id)} orderCtx={orderCtx}
+        betaPosts={cnc.posts.filter(p => p.id !== post.id && isDrill6(p) && p.d6Beta)} openPost={id => onChange({ ...cnc, post: id })} />}
       {/* выпуск программ: раскроечный станок (G-код по листам) и, по галочке, второй постпроцессор — любой из своих:
           второй раскроечный (свой G-код, например станок с присадочной головой) или шестисторонний (файлы по деталям).
           «Создать программы» в заказе выпускает оба, «Сохранить все файлы» — одним архивом, у каждого своя папка */}
@@ -516,7 +517,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
 // ─── β-постпроцессор шестистороннего станка (post.d6Beta) ──────────────────
 // Включает мастер-аккаунт; производству, которому выдан такой постпроцессор, видны и меняются эти настройки
-function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
+function Drill6Beta({ post, set, isMaster, used, orderCtx, betaPosts = [], openPost }) {
   const b = { ...D6B_DEFAULT(), ...(post.d6b || {}) }
   const setB = patch => set({ d6b: { ...b, ...patch } })
   const chk = (k, text) => (
@@ -540,6 +541,19 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
         β-постпроцессор (расширенные настройки)
       </label>
       <Hint>Только мастер-аккаунт. Включите, настройте, отметьте «Для всех» и выдайте 🔑 производству-тестеру. Основной шестисторонний постпроцессор не меняется.</Hint>
+    </div>
+  ) : betaPosts.length ? (
+    // пользователь открыл обычный присадочный (например, сменил тип у копии другого станка) — расширенные настройки
+    // (правила положения, кромка, HDF…) у выданного β-постпроцессора: показываем, где они
+    <div className="card" style={{ marginBottom: 10, border: '1px solid var(--blue)' }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600 }}>Расширенные настройки присадки — в другом постпроцессоре</div>
+      <Hint>Сейчас открыт «{post.name}» — обычный присадочный, у него только основные настройки. Правила положения детали, кромка, пазы, HDF и прочее — у β-постпроцессора:</Hint>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+        {betaPosts.map(p => (
+          <button key={p.id} type="button" onClick={() => openPost?.(p.id)}
+            style={{ padding: '7px 12px', borderRadius: 20, fontSize: 13, border: 'none', background: 'var(--blue)', color: 'white', cursor: 'pointer' }}>Открыть «{p.name}»</button>
+        ))}
+      </div>
     </div>
   ) : null
   // торцевой станок PMSK: свои простые настройки, всё шестистороннее (Face 1–6, положение, фрезеровка пласти) скрыто
