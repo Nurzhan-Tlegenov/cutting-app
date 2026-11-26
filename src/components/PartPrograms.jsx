@@ -50,7 +50,7 @@ function download(name, data) {
 const STOPS = [['bl', 'Нижний и левый'], ['tl', 'Верхний и левый'], ['tr', 'Верхний и правый'], ['br', 'Нижний и правый']]
 const PP_DEFAULT = { place: 'nest', outer: 'full', stops: 'bl', what: { through: true, blind: true, grooves: true, pockets: true, cutouts: true } }
 const WHAT = [['blind', 'Глухие отверстия в пласть'], ['through', 'Сквозные отверстия'], ['grooves', 'Пазы'], ['pockets', 'Выемки'], ['cutouts', 'Внутренние вырезы']]
-const OUTER = [['full', 'Целиком'], ['shaped', 'Только фигурные участки'], ['none', 'Не резать']]
+const OUTER = [['full', 'Резать целиком'], ['shaped', 'Резать только фигурные участки'], ['none', 'Не резать']]
 const swapF = f => (f === 'front' ? 'back' : f === 'back' ? 'front' : f)
 /** Деталь, перевёрнутая изнанкой вверх (через длинную сторону: лево ↔ право): лицо и изнанка меняются местами */
 function flipRow(d, T) {
@@ -81,14 +81,15 @@ function ownPlace(det, T, o) {
   return { det: d, p: { detailIndex: 0, x: 0, y: 0, origX: pw, origY: ph, w: pw, h: ph, rotation: rot * 90, rotated: odd, label: d.name, ...(polygon ? { polygon } : {}) } }
 }
 /** Миниатюра: деталь как ляжет на станок, отверстия и вырезы, угол нуля (упор) */
-function PartMini({ p, det, T, corner, w = 150, h: hMax = 90 }) {
+function PartMini({ p, det, T, corner, w = 150, h: hMax = 90, fit = false }) {
   let f
   try { f = partFeatures(p, det, T) } catch { return null }
   const pw = n0(p.origX), ph = n0(p.origY), pad = 8, k = Math.min((w - 2 * pad) / (pw || 1), (hMax - 2 * pad) / (ph || 1))
   const X = x => pad + x * k, Y = y => pad + (ph - y) * k, H = ph * k + 2 * pad
   const c = cornerOf(corner), cx = c === 'br' || c === 'tr' ? X(pw) : X(0), cy = c === 'tl' || c === 'tr' ? Y(ph) : Y(0)
   return (
-    <svg width={pw * k + 2 * pad} height={H} style={{ display: 'block', flex: '0 0 auto' }}>
+    <svg width={fit ? '100%' : pw * k + 2 * pad} height={fit ? '100%' : H} viewBox={`0 0 ${pw * k + 2 * pad} ${H}`} preserveAspectRatio="xMidYMid meet"
+      style={{ display: 'block', flex: '0 0 auto', ...(fit ? { maxWidth: '100%', maxHeight: '100%' } : {}) }}>
       <polygon points={f.outline.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ')} fill="var(--bg2)" stroke="var(--text-muted)" strokeWidth="1" />
       {f.cutouts.map((cu, i) => (cu.circle ? <circle key={'c' + i} cx={X(cu.circle.cx)} cy={Y(cu.circle.cy)} r={cu.circle.r * k} fill="var(--bg)" stroke="var(--text-muted)" />
         : <polygon key={'c' + i} points={cu.pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ')} fill="var(--bg)" stroke="var(--text-muted)" />))}
@@ -131,6 +132,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   const setOr = (id, patch) => { setOrient(o => ({ ...o, [id]: { ...effOf(id), ...(o[id] || {}), ...patch } })); setRes(null) }
   const setPo = patch => setPp({ po: { ...po, ...patch } })
   const [ppOpen, setPpOpen] = useState(false)
+  const [open, setOpen] = useState({ a: true, b: true })     // разделы настроек
   // во весь экран: большой просмотр детали + список деталей и настройки справа («Выбрать детали с обработкой» открывает сразу)
   const [full, setFull] = useState(false)
   const [act, setAct] = useState(null)
@@ -279,10 +281,21 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
     })
   }
   function settingsEl(withList) {
+    // разделы сворачиваются (во весь экран — чтобы список деталей был виден целиком)
+    const sec = (k, title, sum) => (
+      <div role="button" tabIndex={0} onClick={() => setOpen(o => ({ ...o, [k]: !o[k] }))} onKeyDown={e => { if (e.key === 'Enter') setOpen(o => ({ ...o, [k]: !o[k] })) }}
+        style={{ display: 'flex', gap: 6, alignItems: 'baseline', cursor: 'pointer', padding: '6px 0 2px', borderTop: k === 'a' ? 'none' : '0.5px solid var(--border)', marginTop: k === 'a' ? 0 : 6 }}>
+        <span style={{ color: 'var(--text-hint)', width: 12 }}>{open[k] ? '▼' : '▶'}</span>
+        <b style={{ fontSize: 13 }}>{title}</b>
+        {!open[k] && <span style={{ fontSize: 11.5, color: 'var(--text-hint)', flex: 1, minWidth: 0 }}>{sum}</span>}
+      </div>
+    )
           const chip = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text)' })
     return (
       <div style={{ marginTop: 8, fontSize: 13 }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Внешний контур детали</div>
+        {sec('a', 'Что делаем с деталью', `контур: ${(OUTER.find(o => o[0] === pp.outer)?.[1] || '').toLowerCase()}${WHAT.some(([k]) => !pp.what[k]) ? ' · есть отключённое' : ''} · ${pp.place === 'own' ? 'к упору' : 'как в раскрое'}`)}
+        {open.a && <>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0' }}>Внешний контур детали — резать?</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{OUTER.map(([k, l]) => <button key={k} type="button" style={chip(pp.outer === k)} onClick={() => setPp({ outer: k })}>{l}</button>)}</div>
         <Hint>«Не резать» — фрезер как присадочный станок: деталь уже раскроена (на форматнике), делается только обработка. «Только фигурные участки» — радиусы, улыбки, вырезы по краю, с заходом и выходом вдоль прямой стороны.</Hint>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 2px' }}>Обработка</div>
@@ -297,7 +310,9 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
           <button type="button" style={chip(pp.place === 'nest')} onClick={() => setPp({ place: 'nest' })}>Как в раскрое</button>
           <button type="button" style={chip(pp.place === 'own')} onClick={() => setPp({ place: 'own' })}>К упору — свой поворот</button>
         </div>
-        {pp.place === 'own' && (
+        </>}
+        {pp.place === 'own' && sec('b', 'Упоры и правила положения', `упоры: ${(STOPS.find(x => x[0] === cornerOf(pp.stops))?.[1] || '').toLowerCase()} · ${po.order.filter(k => po.on[k]).length} правил`)}
+        {pp.place === 'own' && open.b && (
           <>
             <Hint>Деталь прижата к Г-образному упору (синяя точка — его угол) с отступом X / Y. Положение выбирается по правилам — сверху важнее; поворот или переворот руками — своё положение детали.</Hint>
             <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', margin: '4px 0 6px' }}>
@@ -415,7 +430,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
         const bigW = wide ? Math.max(320, window.innerWidth - 440 - 60) : window.innerWidth - 40
         const bigH = wide ? window.innerHeight - 220 : Math.round(window.innerHeight * 0.38)
         return (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100dvh', overscrollBehavior: 'contain' }}>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100dvh', overscrollBehavior: 'contain' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}>
               <b style={{ fontSize: 15 }}>Программы на детали · {selected.length}</b>
               <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{pp.place === 'own' ? 'Отступ от упоров' : 'Отступ от нуля'}:</span>
@@ -437,17 +452,22 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
                       </div>
                       <button type="button" onClick={() => go(1)} disabled={selected.length < 2} style={{ ...chipS(false), fontSize: 16, padding: '4px 12px' }}>›</button>
                     </div>
-                    <div style={{ flex: wide ? 1 : '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                      <PartMini p={v.p} det={v.det} T={v.T} corner={pp.place === 'own' ? pp.stops : 'bl'} w={bigW} h={bigH} />
+                    {/* деталь вписывается в свою половину экрана (горизонтальная не уезжает под меню и под список) */}
+                    <div style={{ flex: wide ? 1 : '0 0 auto', minHeight: 0, height: wide ? 'auto' : bigH, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', overflow: 'hidden' }}>
+                      <PartMini p={v.p} det={v.det} T={v.T} corner={pp.place === 'own' ? pp.stops : 'bl'} w={bigW} h={bigH} fit />
                     </div>
                     {v.o ? partBtns(cur, v.o, v.hand) : <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Поворот и переворот — в режиме «К упору — свой поворот» (справа)</div>}
                     <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>● отверстия · ▭ выемки · пазы — синим · синяя точка — {pp.place === 'own' ? 'угол упоров' : 'ноль'}</div>
                   </>
                 ) : <div style={{ color: 'var(--text-hint)' }}>Нет деталей</div>}
               </div>
-              <div style={{ width: wide ? 440 : 'auto', flex: wide ? '0 0 440px' : '0 0 auto', borderLeft: wide ? '0.5px solid var(--border)' : 'none', overflowY: wide ? 'auto' : 'visible', padding: '8px 12px' }}>
-                {settingsEl(false)}
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 2px' }}>Детали — нажмите, чтобы посмотреть</div>
+              <div style={{ width: wide ? 440 : 'auto', flex: wide ? '0 0 440px' : '0 0 auto', borderLeft: wide ? '0.5px solid var(--border)' : 'none', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                {/* настройки закреплены сверху (своя прокрутка), прокручивается только список деталей */}
+                <div style={{ flex: '0 0 auto', maxHeight: wide ? '58%' : 'none', overflowY: wide ? 'auto' : 'visible', padding: '4px 12px 6px', borderBottom: '1px solid var(--border-md)', boxShadow: wide ? '0 2px 6px rgba(0,0,0,.06)' : 'none' }}>
+                  {settingsEl(false)}
+                </div>
+                <div style={{ flex: 1, minHeight: 0, overflowY: wide ? 'auto' : 'visible', padding: '4px 12px 8px' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 2px' }}>Детали — нажмите, чтобы посмотреть</div>
                 {selected.map(id => {
                   const w = viewOf(id)
                   if (!w) return null
@@ -463,6 +483,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
                   )
                 })}
                 {resultsEl()}
+                </div>
               </div>
             </div>
           </div>
@@ -480,9 +501,11 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
           </div>
         </div>, document.body
       )}
-      {save && res?.files?.length > 0 && (
-        <SaveFilesDialog files={res.files.map(f => ({ name: f.name, data: f.data }))} zipName={`${toLatin(order?.order_number || 'order')}_detali`}
-          onClose={() => setSave(false)} onDone={() => setSave(false)} />
+      {save && res?.files?.length > 0 && createPortal(
+        <div style={{ position: 'relative', zIndex: 1000 }}>
+          <SaveFilesDialog files={res.files.map(f => ({ name: f.name, data: f.data }))} zipName={`${toLatin(order?.order_number || 'order')}_detali`}
+            onClose={() => setSave(false)} onDone={() => setSave(false)} />
+        </div>, document.body
       )}
     </div>
   )
