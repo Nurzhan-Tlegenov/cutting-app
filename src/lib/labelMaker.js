@@ -22,7 +22,6 @@ import { edgeThick, parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrow
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
-import { sheetStockNo } from './offcutNo'
 
 // Бирка собирается из элементов: каждый можно поставить в любое место бирки и задать ему размер.
 // Элемент шаблона: { id, type, x, y, w, h (мм), size (высота шрифта, мм), bold, img }.
@@ -64,7 +63,6 @@ export const LABEL_ITEMS = [
   ['qty', 'Количество', 'text'],
   ['image', 'Своя картинка (логотип)', 'text'],
   ['sheet', 'Номер карты', 'text'],
-  ['offcutNo', 'Номер обрезка на складе', 'text'],
   ['num', 'Номер детали на листе', 'text'],
   ['page', 'Номер страницы (по порядку печати)', 'text'],
   ['edgeTop', 'Кромка — сверху', 'text'],
@@ -77,6 +75,7 @@ export const LABEL_ITEMS = [
   // только на бирке делового остатка
   ['remTitle', 'Заголовок (свой текст)', 'text', 'rem'],
   ['remSize', 'Размер остатка', 'text', 'rem'],
+  ['remNo', 'Номер остатка на складе', 'text', 'rem'],
   ['date', 'Дата', 'text', 'rem'],
   ['remText', 'Свой текст', 'text', 'rem'],
   // разметка бирки — линии, рамки, таблица (и на бирке детали, и на бирке остатка)
@@ -91,7 +90,7 @@ export const PART_ITEMS = LABEL_ITEMS.filter(x => !x[3])
 export const SHAPE_ITEMS = LABEL_ITEMS.filter(x => x[3] === 'shape')
 export const isShape = it => itemKind(it.type) === 'shape'
 /** Элементы бирки делового остатка */
-export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
+export const REM_ITEMS = ['remTitle', 'remSize', 'remNo', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
   .map(x => (x[0] === 'map' ? ['map', 'Карта раскроя — остаток чёрным', 'pic'] : x))
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
@@ -130,7 +129,6 @@ export const QR_TOKENS = [
   ['SH', 'Ширина'],
   ['T', 'Толщина'],
   ['KARTA', 'Номер карты'],
-  ['OBREZ', 'Номер обрезка на складе'],
   ['NOM', 'Номер детали на листе'],
   ['KOL', 'Количество'],
   ['KLIENT', 'Заказчик'],
@@ -166,7 +164,6 @@ function qrValue(code, info) {
     case 'SH': return r1(info.width)
     case 'T': return info.thickness ? r1(info.thickness) : ''
     case 'KARTA': return info.sheet
-    case 'OBREZ': return info.offcutNo || ''
     case 'NOM': return info.num
     case 'KOL': return info.qty
     case 'KLIENT': return info.client
@@ -657,7 +654,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   return {
     // объединённый раскрой: «Заказ» на бирке — заказ самой детали (mergeOrders.js → meta.srcOrder)
     order: m.srcOrder?.id ? (m.srcOrder.name || m.srcOrder.number || '') : orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
-    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, offcutNo: sheetStockNo(mat.sheets?.[si], order), client: CLIENTS.get(order?.id) || order?._client || '',
+    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, client: CLIENTS.get(order?.id) || order?._client || '',
     orderName: m.srcOrder?.id ? String(m.srcOrder.name || '').trim() : String(order?.order_name || '').trim(), orderNumber: m.srcOrder?.id ? (m.srcOrder.number || '') : (order?.order_number || ''),
     // артикул заказа: из карточки заказа, а если там пусто — из модели (Базис: свойства модели → «Артикул»)
     article: String((m.srcOrder?.id ? m.srcOrder.article : order?.order_article) || m.article || '').trim(),
@@ -930,7 +927,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 /** Текст элемента бирки */
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
-export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', offcutNo: 'Обрезок №', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
+export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', remNo: 'Остаток №', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
   endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 /** Элементы бирки про пазы — у них есть «С изнанки — в обратных цветах» */
 export const GROOVE_TYPES = ['grooves', 'grooveDims', 'grooveSpan']
@@ -965,8 +962,8 @@ function labelValue(type, info, tpl = null) {
     case 'curved': return info.curved.length ? info.curved.join('; ') : ''
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
     case 'sheet': return String(info.sheet)
-    // деталь лежит на обрезке со склада — его номер (на целом листе пусто, элемент не печатается)
-    case 'offcutNo': return info.offcutNo || ''
+    // бирка делового остатка: его номер на складе (появляется, когда остаток внесён на склад)
+    case 'remNo': return info.remNo ? String(info.remNo) : ''
     case 'num': return String(info.num)
     // номер бирки в общем PDF (страница): кончилась лента в принтере — видно, с какой страницы печатать дальше
     case 'page': return info.page ? (info.pages ? `${info.page}/${info.pages}` : String(info.page)) : ''
@@ -1332,13 +1329,24 @@ export function remTplOf(tpl) {
   const r = tpl?.remTpl && Array.isArray(tpl.remTpl.items) ? tpl.remTpl : defaultRemTpl(tpl?.w, tpl?.h)
   return tpl && (Math.abs(r.w - tpl.w) > 0.01 || Math.abs(r.h - tpl.h) > 0.01) ? { ...resizeLabel(r, tpl.w, tpl.h), kind: 'rem', remQr: r.remQr } : r
 }
-/** Данные для бирки остатка: { order, mat, si, o: { w, h }, client } -> info для drawLabel */
+// Номера остатков на складе для бирок остатков из раскроя заказа: ключ остатка (как в nestingRemnants) -> номер.
+// Заполняет страница бирок, когда остатки внесены на склад (setRemIds)
+const REM_IDS = new Map()
+export const setRemIds = entries => { for (const [k, v] of entries) REM_IDS.set(k, v) }
+export function remKey(x) {
+  const sheet = x?.mat?.sheets?.[x.si]
+  if (!x?.order?.id || !sheet || !x.o) return ''
+  const k = sheetOffcuts(sheet).findIndex(q => q.w === Math.round(x.o.w) && q.h === Math.round(x.o.h) && (x.o.x == null || (q.x === x.o.x && q.y === x.o.y)))
+  return k < 0 ? '' : `auto:${x.order.id}:${x.mat.key}:${x.si}:${k}:${Math.round(x.o.h)}x${Math.round(x.o.w)}`
+}
+/** Данные для бирки остатка: { order, mat, si, o: { w, h }, client, stockId? } -> info для drawLabel */
 export function remInfo(x) {
   const mat = x.mat || {}, nm = String(mat.name || mat.label || x.order?.material_name || '').trim(), t = Number(mat.thickness) || 0
   const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
   return {
     rem: x, order: x.order ? orderTitle(x.order) : '', material: [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · '), materialName: nm, thickness: t,
     remSize: `${r1(x.o.h)} × ${r1(x.o.w)}`, sheet: x.si != null ? x.si + 1 : '', client: x.client || '', date: x.date || today(), meta: {},
+    remNo: x.stockId || REM_IDS.get(remKey(x)) || '',
   }
 }
 /** Строка QR-кода остатка — по ней остаток потом можно найти и учесть (склад деловых остатков) */
@@ -1346,7 +1354,7 @@ export function remQrText(rt, info) {
   const x = info.rem || {}, q = rt.remQr || { parts: ['size', 'material', 'order', 'date'], sep: ';' }
   const val = { size: `${r1(x.o?.h)}x${r1(x.o?.w)}x${info.thickness || ''}`, material: info.materialName, order: info.order, client: info.client, date: info.date, sheet: info.sheet ? `L${info.sheet}` : '' }
   // что в коде — решает производство (части в шаблоне); у остатка со склада добавляется его номер (R123)
-  return ['OSTATOK', ...(x.stockId ? [`R${x.stockId}`] : []), ...(q.parts || []).map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
+  return ['OSTATOK', ...(info.remNo ? [`R${info.remNo}`] : []), ...(q.parts || []).map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
 }
 /**
  * Карта листа для бирки остатка: где на листе этот остаток (закрашен) — кто клеит руками, видит, куда клеить.

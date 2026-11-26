@@ -13,7 +13,7 @@ import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import OffcutOwner from '../components/OffcutOwner'
-import { syncOrderRemnants, stockUseOrder, nestingRemnants } from '../lib/stock'
+import { syncOrderRemnants, stockUseOrder, nestingRemnants, stockIdsOfOrder } from '../lib/stock'
 import { sheetStockNo } from '../lib/offcutNo'
 import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
@@ -30,7 +30,7 @@ import { cornerShift } from '../lib/sheetCorner'
 import { backOf, backParts, backJob } from '../lib/backSide'
 import { metaPos, detailMeta } from '../lib/partLabel'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf, skipLabels } from '../lib/gcode'
-import { setLabelBack, setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
+import { setLabelBack, setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels, setRemIds } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -117,6 +117,7 @@ export default function CncPage() {
   }, [id])
 
   const mats = useMemo(() => savedNestings(order, details), [order, details])
+  const remSync = useRef(null)             // остатки внесены на склад — номера для бирок остатков
   const mat0 = mats.find(m => m.key === matKey) || mats[0] || null
   // замена торцевых отверстий для программ этого заказа (на станке нет такого сверла): { 'Ø|глубина': { d, depth } }
   const [edgeRemap, setEdgeRemapState] = useState(() => (getUserSettings(user).edgeRemap || {})[id] || {})
@@ -217,7 +218,8 @@ export default function CncPage() {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     // производство обязательно выбирает, чьи деловые остатки раскроя (мои — на склад / клиента) — иначе забудут
     if (ownerCan && !order?.offcuts_owner && nestingRemnants(order, mats).length) { setOwnerAttn(Date.now()); return false }
-    syncOrderRemnants(order, mats)          // «Мои остатки» — на склад остатков (без дублей при повторном выпуске)
+    // «Мои остатки» — на склад остатков (без дублей при повторном выпуске); их номера — на бирки остатков
+    remSync.current = syncOrderRemnants(order, mats).then(() => (order?.id ? stockIdsOfOrder(order.id) : [])).then(setRemIds).catch(() => {})
     if (order?.id) stockUseOrder(order.id)   // остатки со склада, взятые в этот раскрой, — списываются «в заказ»
     if (beamMat && saw) return buildBeam()
     const files = sel.map(si => buildMain(si))
@@ -263,12 +265,13 @@ export default function CncPage() {
     if (!sheets.length || (!table && !withLabels)) return
     setLabelBusy(true)
     const m = { ...mat }
+    const wait = labelTpl?.offcuts && remSync.current ? remSync.current : Promise.resolve()
     // пильный центр: бирки по готовности деталей и в положении выхода со станка (beamSawLabels.js)
     const beamOpts = beamMat && saw ? { seqOf: beamLabelSeq, partOf: (sheet, pi) => beamExitPart(sheet.placed[pi], sheet, saw) } : {}
-    Promise.all([
+    wait.then(() => Promise.all([
       buildLabelFiles({ order, mat: m, base: baseName(), post: machine, tpl: labelTpl, sheets, ...beamOpts }),
       table ? Promise.resolve(null) : buildLabelsPdf({ order, mat: m, tpl: labelTpl, ...beamOpts }).catch(() => null),
-    ])
+    ]))
       .then(([labels, pdf]) => setBuilt(b => (b && b.files === files ? { ...b, labels: pdf ? [...labels, { name: `${mainLatin ? 'Birki' : 'Бирки'}_${baseName()}.pdf`, data: pdf }] : labels, labelsOwnDir: !table } : b)))
       .catch(() => {})
       .finally(() => setLabelBusy(false))

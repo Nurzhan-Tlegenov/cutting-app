@@ -24,7 +24,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { setLabelBack, setLabelClient, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx, EUL_CLASSES, EUL_DEFAULT_W, EUL_DASHES } from '../lib/labelMaker'
+import { setLabelBack, setLabelClient, setRemIds, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx, EUL_CLASSES, EUL_DEFAULT_W, EUL_DASHES } from '../lib/labelMaker'
 import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, userItemsBySrc, pickParse, pickType, srcName, MODEL_SRC, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap, GROOVE_TYPES } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc, activePost } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
@@ -34,7 +34,7 @@ import { fileNamesOf } from '../lib/fileNames'
 import { orderClient } from '../lib/productionApi'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import OffcutOwner from '../components/OffcutOwner'
-import { syncOrderRemnants } from '../lib/stock'
+import { syncOrderRemnants, stockIdsOfOrder } from '../lib/stock'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
@@ -75,7 +75,7 @@ function Label({ tpl, order, mat, si, pi, n, onOpen, bp, page, pages }) {
 }
 
 // Бирка на деловой обрезок листа: заказ, материал, размер
-function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
+function OffcutLabel({ tpl, order, mat, si, o, client = '', stamp = 0 }) {
   const ref = useRef(null)
   useEffect(() => {
     const cv = ref.current
@@ -84,7 +84,7 @@ function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
     cv.width = w; cv.height = h
     const draw = () => drawOffcutLabel(cv, tpl, { order, mat, si, o, client })
     draw(); const rt = remTplOf(tpl); if (rt.items.some(i => i.img)) preloadLabelImages(rt).then(draw)
-  }, [tpl, order, mat, si, o.w, o.h, o.x, o.y, client])
+  }, [tpl, order, mat, si, o.w, o.h, o.x, o.y, client, stamp])
   return <canvas ref={ref} />
 }
 
@@ -143,7 +143,8 @@ function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
           </div>
         </div>
       )}
-      <LabelEditor tpl={rt} onChange={set} order={sample.order} mat={sample.mat} shared={false} rem={sample} previewEl={previewEl} />
+      {/* образец: номера на складе ещё нет — показываем условный, чтобы было видно, где он встанет */}
+      <LabelEditor tpl={rt} onChange={set} order={sample.order} mat={sample.mat} shared={false} rem={{ ...sample, stockId: remInfo(sample).remNo || 123 }} previewEl={previewEl} />
     </div>
   )
 }
@@ -1103,6 +1104,18 @@ export default function LabelsPage() {
   }, [id])
   const mats = useMemo(() => savedNestings(order, details), [order, details])
   const mat = mats.find(m => m.key === matKey) || mats[0] || null
+  // бирки остатков: остатки производства внесены на склад — на бирке их номер (элемент «Номер остатка на складе»)
+  const [remStamp, setRemStamp] = useState(0)
+  useEffect(() => {
+    if (!order?.id || !tpl?.offcuts || !mats.length) return
+    let alive = true
+    ;(async () => {
+      if (order.offcuts_owner === 'production') await syncOrderRemnants(order, mats)
+      const ids = await stockIdsOfOrder(order.id)
+      if (alive && ids.length) { setRemIds(ids); setRemStamp(Date.now()) }
+    })()
+    return () => { alive = false }
+  }, [order, mats, tpl?.offcuts])
   const bp = useMemo(() => beamPostOf(user), [user])   // постпроцессор пилы — для бирок пильного центра
   if (loading) return <div className="page"><CncLoader label="Готовим бирки…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
@@ -1282,7 +1295,7 @@ export default function LabelsPage() {
             <p className="section-title no-print">{sh.stock === 'offcut' ? 'Остаток' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
             <div className="lbl-grid">
               {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} n={q.n} page={q.page} pages={q.pages} bp={bp} onOpen={() => setView(q.n)} />)}
-              {tpl.offcuts && sheetOffcuts(sh).map((o, k) => <OffcutLabel key={'o' + k} tpl={tpl} order={order} mat={mat} si={si} o={o} client={clientName} />)}
+              {tpl.offcuts && sheetOffcuts(sh).map((o, k) => <OffcutLabel key={'o' + k} tpl={tpl} order={order} mat={mat} si={si} o={o} client={clientName} stamp={remStamp} />)}
             </div>
           </div>
         ))}

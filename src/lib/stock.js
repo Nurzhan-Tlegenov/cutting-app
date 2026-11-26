@@ -208,3 +208,10 @@ export async function syncOrderRemnants(order, mats) {
   try { return await stockFromNesting(order.id, 'production', nestingRemnants(order, mats)) } catch { return null }
 }
 
+/** Номера остатков, которые пришли на склад из раскроя заказа: [[ключ, номер]] (видны тем, у кого есть доступ к складу) */
+export async function stockIdsOfOrder(orderId) {
+  try {
+    const { data, error } = await supabase.from('remnants').select('id, source_key').eq('source_order', orderId).eq('source', 'nesting')
+    return error ? [] : (data || []).filter(r => r.source_key).map(r => [r.source_key, r.id])
+  } catch { return [] }
+}
