@@ -11,7 +11,7 @@ import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import MaterialFilter from '../components/MaterialFilter'
 import { detailMatKey } from '../lib/detailMaterial'
-import { detailMeta } from '../lib/partLabel'
+import { detailMeta, metaPos, metaDes } from '../lib/partLabel'
 import Model3DButton from '../components/Model3DButton'
 import { edgeTotals } from '../lib/edgeLength'
 import CncLoader from '../components/CncLoader'
@@ -478,7 +478,11 @@ export default function OrderPage() {
                   )}
                   <td style={{ padding: '8px 10px' }}>
                     {d.prefix && <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 500 }}>{d.prefix}</div>}
-                    <div>{detailMeta(d)?.des ? <span style={{ color: 'var(--text-hint)', marginRight: 5 }}>{detailMeta(d).des}</span> : null}{d.name}{isTwoSided(d, order.material_thickness) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇅ 2 стороны</span>}{backSide(d, order.material_thickness) === 'back' && <span title="Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇣ снизу</span>}</div>
+                    <div>{(() => {
+                      // впереди — то же, что подписано на картах: позиция (подпись «Позиция…») или обозначение
+                      const m = detailMeta(d), code = labelMode === 'pos' || labelMode === 'pos_name' ? (metaPos(m) || metaDes(m)) : metaDes(m) || (labelMode === 'name' ? '' : metaPos(m))
+                      return code ? <b style={{ color: 'var(--text)', marginRight: 6, fontFamily: 'monospace' }}>{code}</b> : null
+                    })()}{d.name}{isTwoSided(d, order.material_thickness) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇅ 2 стороны</span>}{backSide(d, order.material_thickness) === 'back' && <span title="Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇣ снизу</span>}</div>
                   </td>
                   <td style={{ padding: '8px 6px', textAlign: 'center', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{d.length}×{d.width}</td>
                   <td style={{ padding: '8px 6px', textAlign: 'center' }}>{d.qty}</td>
