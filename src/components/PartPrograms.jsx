@@ -4,7 +4,7 @@
 // Программа — тем же генератором и по тем же настройкам постпроцессора и «Обработки» (в т.ч. «Выводить в УП»), что и
 // программы листов. Деталь стоит как в раскрое (тот же поворот), «лист» — заготовка «деталь + отступ с каждой стороны»:
 // обработка начинается с отступа X / Y от нуля станка. Отступы — настройка аккаунта (запоминаются).
-import { useEffect, useMemo, useState, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCnc } from '../hooks/useCnc'
@@ -137,12 +137,40 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   const [full, setFull] = useState(false)
   const [act, setAct] = useState(null)
   useEffect(() => { if (fullSig > 0) Promise.resolve().then(() => { setFull(true); setPpOpen(true) }) }, [fullSig])
+  // размеры частей окна (перетаскиваются ползунками, запоминаются): ширина правой колонки и доля настроек в ней
+  const [ui, setUi0] = useState(() => ({ rw: 440, top: 58, ...(getUserSettings(user).partProgUi || {}) }))
+  const uiRef = useRef(ui)
+  const setUi = (patch, save) => { const v = { ...uiRef.current, ...patch }; uiRef.current = v; setUi0(v); if (save) saveUserSettings({ partProgUi: v }, user) }
+  const colRef = useRef(null)
+  const drag = (kind, e) => {
+    e.preventDefault()
+    const move = ev => {
+      if (kind === 'v') setUi({ rw: Math.round(Math.max(300, Math.min(window.innerWidth - 320, window.innerWidth - ev.clientX))) })
+      else { const r = colRef.current?.getBoundingClientRect(); if (r) setUi({ top: Math.round(Math.max(12, Math.min(88, (ev.clientY - r.top) / r.height * 100))) }) }
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); setUi({}, true) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  // клавиатура: Esc — закрыть; ↑ ↓ (и ← →) — предыдущая / следующая деталь, а не прокрутка
   useEffect(() => {
     if (!full) return
-    const k = e => { if (e.key === 'Escape') setFull(false) }
+    const k = e => {
+      if (e.key === 'Escape') { setFull(false); return }
+      if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '')) return
+      e.preventDefault()
+      const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1
+      setAct(a => {
+        const i = Math.max(0, selected.indexOf(a))
+        const n = selected[Math.max(0, Math.min(selected.length - 1, i + d))]
+        requestAnimationFrame(() => document.querySelector(`[data-pp="${n}"]`)?.scrollIntoView({ block: 'nearest' }))
+        return n
+      })
+    }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [full])
+  }, [full, selected])
   // у скольких выбранных деталей есть присадка (отверстия в пласть и в торец)
   const drilled = selected.filter(id => {
     const d = details.find(x => x.id === id)
@@ -427,7 +455,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
         const cur = selected.includes(act) ? act : selected[0]
         const ci = selected.indexOf(cur), v = cur ? viewOf(cur) : null
         const go = d => setAct(selected[(ci + d + selected.length) % selected.length])
-        const bigW = wide ? Math.max(320, window.innerWidth - 440 - 60) : window.innerWidth - 40
+        const bigW = wide ? Math.max(320, window.innerWidth - ui.rw - 60) : window.innerWidth - 40
         const bigH = wide ? window.innerHeight - 220 : Math.round(window.innerHeight * 0.38)
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100dvh', overscrollBehavior: 'contain' }}>
@@ -461,18 +489,22 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
                   </>
                 ) : <div style={{ color: 'var(--text-hint)' }}>Нет деталей</div>}
               </div>
-              <div style={{ width: wide ? 440 : 'auto', flex: wide ? '0 0 440px' : '0 0 auto', borderLeft: wide ? '0.5px solid var(--border)' : 'none', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              {/* ползунок: ширина правой колонки */}
+              {wide && <div onPointerDown={e => drag('v', e)} title="Потяните — шире / уже" style={{ flex: '0 0 8px', cursor: 'col-resize', background: 'var(--bg2)', borderLeft: '0.5px solid var(--border)', borderRight: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none' }}><span style={{ width: 2, height: 36, borderRadius: 1, background: 'var(--text-hint)' }} /></div>}
+              <div ref={colRef} style={{ width: wide ? ui.rw : 'auto', flex: wide ? `0 0 ${ui.rw}px` : '0 0 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 {/* настройки закреплены сверху (своя прокрутка), прокручивается только список деталей */}
-                <div style={{ flex: '0 0 auto', maxHeight: wide ? '58%' : 'none', overflowY: wide ? 'auto' : 'visible', padding: '4px 12px 6px', borderBottom: '1px solid var(--border-md)', boxShadow: wide ? '0 2px 6px rgba(0,0,0,.06)' : 'none' }}>
+                <div style={{ flex: wide ? `0 0 ${ui.top}%` : '0 0 auto', minHeight: 0, overflowY: wide ? 'auto' : 'visible', padding: '4px 12px 6px' }}>
                   {settingsEl(false)}
                 </div>
+                {/* ползунок: сколько места настройкам и сколько списку */}
+                {wide && <div onPointerDown={e => drag('h', e)} title="Потяните — больше настройкам / списку" style={{ flex: '0 0 8px', cursor: 'row-resize', background: 'var(--bg2)', borderTop: '0.5px solid var(--border)', borderBottom: '0.5px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none' }}><span style={{ width: 36, height: 2, borderRadius: 1, background: 'var(--text-hint)' }} /></div>}
                 <div style={{ flex: 1, minHeight: 0, overflowY: wide ? 'auto' : 'visible', padding: '4px 12px 8px' }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 2px' }}>Детали — нажмите, чтобы посмотреть</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 2px' }}>Детали — нажмите, чтобы посмотреть{wide ? ' · ↑ ↓ на клавиатуре — следующая' : ''}</div>
                 {selected.map(id => {
                   const w = viewOf(id)
                   if (!w) return null
                   return (
-                    <div key={id} role="button" tabIndex={0} onClick={() => setAct(id)} onKeyDown={e => { if (e.key === 'Enter') setAct(id) }}
+                    <div key={id} data-pp={id} role="button" tabIndex={0} onClick={() => setAct(id)} onKeyDown={e => { if (e.key === 'Enter') setAct(id) }}
                       style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', cursor: 'pointer', borderRadius: 8, background: id === cur ? 'var(--blue-light)' : 'transparent', borderTop: '0.5px solid var(--border)' }}>
                       <PartMini p={w.p} det={w.det} T={w.T} corner={pp.place === 'own' ? pp.stops : 'bl'} w={110} h={60} />
                       <div style={{ flex: 1, minWidth: 0 }}>
