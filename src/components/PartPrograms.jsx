@@ -126,7 +126,7 @@ function PartMini({ p, det, T, corner, w = 150, h: hMax = 90, fit = false }) {
   )
 }
 
-export default function PartPrograms({ order, details, selected, onClear, onChanged, canProg = true , fullSig = 0}) {
+export default function PartPrograms({ order, details, selected, onClear, onChanged, canProg = true , fullSig = 0, onFullUsed}) {
   const { user } = useAuth()
   const { cnc, ready } = useCnc(null, order?.production_id || null)
   const [off, setOff] = useState(() => ({ x: 10, y: 10, ...(getUserSettings(user).partProg || {}) }))
@@ -163,7 +163,9 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   // во весь экран: большой просмотр детали + список деталей и настройки справа («Выбрать детали с обработкой» открывает сразу)
   const [full, setFull] = useState(false)
   const [act, setAct] = useState(null)
-  useEffect(() => { if (fullSig > 0) Promise.resolve().then(() => { setFull(true); setPpOpen(true) }) }, [fullSig])
+  // «открыть во весь экран» — один раз: заказ сбрасывает метку (onFullUsed), иначе окно открывалось бы при каждом
+  // новом выборе деталей галочками
+  useEffect(() => { if (fullSig > 0) Promise.resolve().then(() => { setFull(true); setPpOpen(true); onFullUsed?.() }) }, [fullSig, onFullUsed])
   // размеры частей окна (перетаскиваются ползунками, запоминаются): ширина правой колонки и доля настроек в ней
   const [ui, setUi0] = useState(() => ({ rw: 440, top: 58, ...(getUserSettings(user).partProgUi || {}) }))
   const uiRef = useRef(ui)

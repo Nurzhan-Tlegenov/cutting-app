@@ -2,7 +2,7 @@ import OrderTechProcess from '../components/StageLog'
 import ShareBadge from '../components/ShareBadge'
 import { nestingFaults, faultText, FAULT_TITLE } from '../lib/nestingCheck'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -63,7 +63,8 @@ export default function OrderPage() {
   const [labelMode] = useLabelMode(user)
   const [mapMat, setMapMat] = useState('')        // материал, чьи карты раскроя показаны
   const [partSel, setPartSel] = useState([])       // производство: детали для отдельных управляющих программ (id строк)
-  const [partFull, setPartFull] = useState(0)        // «Выбрать детали с обработкой» — программы деталей во весь экран
+  const [partFull, setPartFull] = useState(0)        // «Выбрать детали с обработкой» — программы деталей во весь экран (один раз)
+  const fullUsed = useCallback(() => setPartFull(0), [])
   useEffect(() => { fetchOrder() }, [id])
   // сотрудник производства: что ему можно в этом заказе (статусы, ЧПУ, бирки, цены); null — не сотрудник
   const [wperms, setWperms] = useState(null)
@@ -489,7 +490,7 @@ export default function OrderPage() {
             </tbody>
           </table>
         </div>
-        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} canProg={partProg} fullSig={partFull} />}
+        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} canProg={partProg} fullSig={partFull} onFullUsed={fullUsed} />}
       </div>
       {isDraft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
