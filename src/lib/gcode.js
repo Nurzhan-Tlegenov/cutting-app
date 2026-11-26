@@ -1393,7 +1393,11 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
  * sheet — лист из раскроя, geo — геометрия листа (sheetGeo), details — детали материала, thickness — толщина,
  * cnc — настройки (см. cncSettings.js).  -> { text, lines, warnings, tools }
  */
-export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, outer = true, score = true, edits = null }) {
+export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, outer: outer0 = true, score = true, edits = null, outerMode = 'full', skipOver = null }) {
+  // outerMode (программы отдельных деталей, PartPrograms.jsx): 'full' — контур целиком; 'shaped' — только фигурные участки
+  // контура (радиусы, улыбки, вырезы по краю) с выходом за прямые стороны; 'none' — контур не режется (фрезер как
+  // присадочный станок: деталь уже раскроена). skipOver — что ещё не выводить, поверх «Обработки» (ключи skipOf)
+  const outer = outer0 && outerMode !== 'none'
   // edits — ручная правка оператора из симуляции (своя у листа): { order: [pi…] — порядок контуров деталей,
   // ends: { pi: 'lb'|'rb'|'rt'|'lt' } — угол входа/последнего реза детали }. Ответственность — на том, кто правил
   // outer: false — без контура деталей (доприсадка обратной стороны, backSide.js); score: false — без шинковки
@@ -1449,7 +1453,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const noTool = what => { miss[what] = (miss[what] || 0) + 1 }
   let edge = 0, back = 0, odd = 0
 
-  const skip = skipOf(ops)
+  const skip = { ...skipOf(ops), ...(skipOver || {}) }
   const boxes = []                   // габариты деталей на листе — для проверки «только прямоугольники»
   // Вложенные детали (деталь лежит в сквозном вырезе другой — см. nestInHoles.js): для каждой детали — её контур на
   // листе, её вырезы и работы по ним. Порядок резов для них: контур вложенной детали → вырез хозяина → контур хозяина
@@ -1651,6 +1655,35 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
           warn.add(L0 > 0 && W0 > 0
             ? `Деталь «${nm}» (${num(L0)}×${num(W0)}): не удалось построить обход контура — она пропущена, проверьте её контур.`
             : `Деталь «${nm}» с нулевым размером (${num(L0)}×${num(W0)}) — резать нечего, она пропущена. Исправьте или удалите её в заказе и пересчитайте раскрой.`)
+        }
+        else if (outerMode === 'shaped') {
+          // только фигурные участки: точки обхода, не лежащие на прямых сторонах габарита (габарит + радиус фрезы);
+          // каждый участок — открытым резом с заходом и выходом вдоль прямой стороны за край детали
+          const bb = bboxOf(f.outline), e = 0.05
+          const onBox = ([x, y]) => (Math.abs(x - (bb.x0 - r)) < e || Math.abs(x - (bb.x1 + r)) < e) && y >= bb.y0 - r - e && y <= bb.y1 + r + e
+            || (Math.abs(y - (bb.y0 - r)) < e || Math.abs(y - (bb.y1 + r)) < e) && x >= bb.x0 - r - e && x <= bb.x1 + r + e
+          const n = base.length, off = base.map(q => !onBox(q))
+          const s0 = off.findIndex(v => !v)
+          const runs = []
+          if (s0 < 0) runs.push([...base, base[0]])                       // нет прямых сторон (круг) — весь контур
+          else {
+            let cur = null, i0 = 0
+            for (let k = 1; k <= n; k++) {
+              const i = (s0 + k) % n
+              if (off[i]) { if (!cur) { i0 = (i - 1 + n) % n; cur = [base[i0]] } cur.push(base[i]) }
+              else if (cur) { cur.prev = base[(i0 - 1 + n) % n]; cur.next = base[(i + 1) % n]; cur.push(base[i]); runs.push(cur); cur = null }
+            }
+          }
+          // заход и выход — вдоль прямой стороны детали (к соседней вершине на габарите), за точку касания на lead мм
+          const lead = r + 3
+          const ext = (a, to) => { const dx = to[0] - a[0], dy = to[1] - a[1], l = Math.hypot(dx, dy) || 1; return [a[0] + dx / l * Math.min(lead, l), a[1] + dy / l * Math.min(lead, l)] }
+          const zs = levels(T, -millOver, n0(t.maxPass))
+          for (const run of runs) {
+            if (run.length < 2) continue
+            const pts = (s0 < 0 || !run.prev ? run : [ext(run[0], run.prev), ...run, ext(run[run.length - 1], run.next)]).map(G)
+            const job = { stage: 1, rank: 4, tool: t, at: pts[0], pts, run: out => cutOpen(out, job.pts, zs, t, liftZ, T, { entry: 'straight' }) }   // как вырез: простой порядок
+            jobs.push(job)
+          }
         }
         else {
           const L = orientFromInside(base.map(G), o.dir, sheetRect)

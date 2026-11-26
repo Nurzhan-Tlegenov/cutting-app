@@ -438,6 +438,17 @@ export default function OrderPage() {
           )}
         </div>
         <MaterialFilter details={details} order={order} value={matFilter} onChange={setMatFilter} />
+        {partCnc && (() => {
+          // выбрать только детали с обработкой (присадка, пазы, выемки, вырезы, фигурный контур) — для программ на фрезер
+          const work = d => { let c = d.contour; if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+            return !!c && ['drillings', 'holes', 'grooves', 'decor', 'edgeGrooves'].some(k => (c[k] || []).length) || (c?.vertices || []).length > 4 }
+          const ids = shownDetails.filter(work).map(d => d.id)
+          return ids.length > 0 && (
+            <button type="button" onClick={() => setPartSel(ids)}
+              style={{ margin: '0 0 6px', padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>
+              ☑ Выбрать детали с обработкой · {ids.length}</button>
+          )
+        })()}
         <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>

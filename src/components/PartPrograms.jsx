@@ -10,6 +10,9 @@ import { useAuth } from '../context/AuthContext'
 import { useCnc } from '../hooks/useCnc'
 import { routerPost, postView } from '../lib/cncSettings'
 import { buildSheetGcode, partFeatures, skipOf } from '../lib/gcode'
+import { roughShapePolygons } from '../lib/trueShapeNesting'
+import { mirrorContour } from '../lib/mirrorDetail'
+import { cornerOf } from '../lib/sheetCorner'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import { cornerShift } from '../lib/sheetCorner'
 import { lazyRetry } from '../lib/lazyRetry'
@@ -41,6 +44,59 @@ function download(name, data) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
+// Что выводить в программы деталей (поверх «Обработки»: отключённое там и так не выводится) и как резать внешний контур
+const PP_DEFAULT = { place: 'nest', outer: 'full', what: { through: true, blind: true, grooves: true, pockets: true, cutouts: true } }
+const WHAT = [['blind', 'Глухие отверстия в пласть'], ['through', 'Сквозные отверстия'], ['grooves', 'Пазы'], ['pockets', 'Выемки'], ['cutouts', 'Внутренние вырезы']]
+const OUTER = [['full', 'Целиком'], ['shaped', 'Только фигурные участки'], ['none', 'Не резать']]
+const swapF = f => (f === 'front' ? 'back' : f === 'back' ? 'front' : f)
+/** Деталь, перевёрнутая изнанкой вверх (через длинную сторону: лево ↔ право): лицо и изнанка меняются местами */
+function flipRow(d, T) {
+  let c = d.contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  if (!c) return d
+  const W = n0(d.width), m = mirrorContour(c, W) || {}
+  const thr = dr => !(n0(dr.depth) > 0) || n0(dr.depth) >= T - 0.05            // сквозное видно с обеих сторон
+  const drillings = (m.drillings || []).map(dr => {
+    const x = { ...dr }
+    if (x.kind === 'edge') x.offsetFace = Math.round((T - (x.offsetFace ?? T / 2)) * 10) / 10
+    else if (!thr(x)) x.face = swapF(x.face || 'front')
+    if (x.pairFace) x.pairFace = swapF(x.pairFace)
+    if (Array.isArray(x.extraHoles)) x.extraHoles = x.extraHoles.map(eh => (eh.kind === 'face' ? { ...eh, face: swapF(eh.face || 'front') } : eh))
+    return x
+  })
+  const grooves = (m.grooves || []).map(g => ({ ...g, face: swapF(g.face || 'front') }))
+  const holes = (m.holes || []).map(h => (h.type === 'pocket' ? { ...h, face: swapF(h.face || 'front') } : h))
+  const decor = (m.decor || []).map(dc => ({ ...dc, face: swapF(dc.face || 'front'), ...(Array.isArray(dc.path) ? { path: [...dc.path].reverse().map(([x, y]) => [W - x, y]) } : {}) }))
+  return { ...d, contour: JSON.stringify({ ...m, drillings, grooves, holes, decor }) }
+}
+/** Деталь на станке «к упору»: свой поворот (0…3 четверти) и переворот -> { p, det } (p — в нуле детали) */
+function ownPlace(det, T, o) {
+  const rot = (((o?.rot || 0) % 4) + 4) % 4, d = o?.flip ? flipRow(det, T) : det
+  const W = n0(d.width), H = n0(d.length), odd = rot % 2 === 1, pw = odd ? H : W, ph = odd ? W : H
+  let polygon
+  try { polygon = roughShapePolygons(d)[rot * 90].map(([x, y]) => ({ x, y })) } catch { polygon = undefined }
+  return { det: d, p: { detailIndex: 0, x: 0, y: 0, origX: pw, origY: ph, w: pw, h: ph, rotation: rot * 90, rotated: odd, label: d.name, ...(polygon ? { polygon } : {}) } }
+}
+/** Миниатюра: деталь как ляжет на станок, отверстия и вырезы, угол нуля (упор) */
+function PartMini({ p, det, T, corner, w = 150 }) {
+  let f
+  try { f = partFeatures(p, det, T) } catch { return null }
+  const pw = n0(p.origX), ph = n0(p.origY), pad = 8, k = Math.min((w - 2 * pad) / (pw || 1), 90 / (ph || 1))
+  const X = x => pad + x * k, Y = y => pad + (ph - y) * k, H = ph * k + 2 * pad
+  const c = cornerOf(corner), cx = c === 'br' || c === 'tr' ? X(pw) : X(0), cy = c === 'tl' || c === 'tr' ? Y(ph) : Y(0)
+  return (
+    <svg width={pw * k + 2 * pad} height={H} style={{ display: 'block', flex: '0 0 auto' }}>
+      <polygon points={f.outline.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ')} fill="var(--bg2)" stroke="var(--text-muted)" strokeWidth="1" />
+      {f.cutouts.map((cu, i) => (cu.circle ? <circle key={'c' + i} cx={X(cu.circle.cx)} cy={Y(cu.circle.cy)} r={cu.circle.r * k} fill="var(--bg)" stroke="var(--text-muted)" />
+        : <polygon key={'c' + i} points={cu.pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(' ')} fill="var(--bg)" stroke="var(--text-muted)" />))}
+      {f.pockets.map((q, i) => <rect key={'k' + i} x={X(q.x0)} y={Y(q.y1)} width={(q.x1 - q.x0) * k} height={(q.y1 - q.y0) * k} fill="var(--amber-light)" stroke="var(--amber)" strokeWidth="0.6" />)}
+      {f.grooves.map((g, i) => (g.x0 != null ? <rect key={'g' + i} x={X(g.x0)} y={Y(g.y1)} width={Math.max(1, (g.x1 - g.x0) * k)} height={Math.max(1, (g.y1 - g.y0) * k)} fill="var(--blue)" opacity="0.5" /> : null))}
+      {f.holes.map((h, i) => <circle key={'h' + i} cx={X(h.x)} cy={Y(h.y)} r={Math.max(1.2, h.d / 2 * k)} fill="var(--danger)" />)}
+      <circle cx={cx} cy={cy} r="4" fill="var(--blue)" />
+    </svg>
+  )
+}
+
 export default function PartPrograms({ order, details, selected, onClear, onChanged, canProg = true }) {
   const { user } = useAuth()
   const { cnc, ready } = useCnc(null, order?.production_id || null)
@@ -49,12 +105,18 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   const [save, setSave] = useState(false)
   const [sim, setSim] = useState(null)           // программа в симуляторе
   useBackClose(!!sim, () => setSim(null))        // «назад» на телефоне закрывает симулятор, а не страницу
-  const setO = patch => { const v = { ...off, ...patch }; setOff(v); setRes(null); saveUserSettings({ partProg: { ...v, name: nameQ } }, user) }
+  const setO = patch => { const v = { ...off, ...patch }; setOff(v); setRes(null); saveUserSettings({ partProg: { ...v, name: nameQ, pp } }, user) }
   const mats = useMemo(() => savedNestings(order, cutDetails(details, parseEdgeTypes(order?.edge_types))), [order, details])
   const [nameQ, setNameQ] = useState(() => ({ ...PART_NAME_DEFAULT, ...(getUserSettings(user).partProg?.name || {}) }))
   const [nameEdit, setNameEdit] = useState(false)
   const [busy, setBusy] = useState('')
   const [done, setDone] = useState('')
+  // что выводить и где деталь: как в раскрое или «к упору» со своим поворотом / переворотом (запоминается за аккаунтом)
+  const [pp, setPp0] = useState(() => { const v = getUserSettings(user).partProg?.pp || {}; return { ...PP_DEFAULT, ...v, what: { ...PP_DEFAULT.what, ...(v.what || {}) } } })
+  const setPp = patch => { const v = { ...pp, ...patch }; setPp0(v); setRes(null); saveUserSettings({ partProg: { ...off, name: nameQ, pp: v } }, user) }
+  const [orient, setOrient] = useState({})       // id -> { rot, flip } — положение деталей «к упору»
+  const setOr = (id, patch) => { setOrient(o => ({ ...o, [id]: { ...(o[id] || {}), ...patch } })); setRes(null) }
+  const [ppOpen, setPpOpen] = useState(false)
   // у скольких выбранных деталей есть присадка (отверстия в пласть и в торец)
   const drilled = selected.filter(id => {
     const d = details.find(x => x.id === id)
@@ -86,7 +148,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
     setRes(null); onChanged?.()
     setDone(`Присадка удалена у ${r.data ?? drilled.length} дет. Программы и бирки этого заказа создайте заново.`)
   }
-  const setName = v => { setNameQ(v); setRes(null); saveUserSettings({ partProg: { ...off, name: v } }, user) }
+  const setName = v => { setNameQ(v); setRes(null); saveUserSettings({ partProg: { ...off, name: v, pp } }, user) }
   // где деталь стоит в раскрое на фрезере -> { mat, sh, p, si, pi } или null
   const findHit = id => {
     for (const mat of mats) {
@@ -124,17 +186,21 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       const label = [detailMeta(row)?.des, row?.name].filter(Boolean).join(' ') || 'Деталь'
       const hit = findHit(id)
       if (!hit) { notes.push(`«${label}» — нет в раскрое на фрезере, программа не создана.`); continue }
-      const { mat, sh, p } = hit
+      const { mat, sh } = hit
+      // «к упору»: деталь в нуле станка со своим поворотом / переворотом; иначе — как в раскрое
+      const own = pp.place === 'own' ? ownPlace(mat.details[hit.p.detailIndex], n0(mat.thickness) || 16, orient[id]) : null
+      const p = own ? own.p : hit.p, dets = own ? [own.det] : mat.details
       const pw = n0(p.origX), ph = n0(p.origY)
       const g0 = sheetGeo(order, mat.result, sh)
-      const geo = { ...g0, sheetW: pw + 2 * ox, sheetL: ph + 2 * oy, marginL: 0, marginR: 0, marginT: 0, marginB: 0, usableX: pw + 2 * ox, usableY: ph + 2 * oy }
+      const geo = { ...g0, sheetW: pw + 2 * ox, sheetL: ph + 2 * oy, marginL: 0, marginR: 0, marginT: 0, marginB: 0, usableX: pw + 2 * ox, usableY: ph + 2 * oy, ...(own ? { corner: post.corner } : {}) }
       const sheet = { placed: [{ ...p, x: ox, y: oy }], manualOffcuts: [] }
-      const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id }, score: false })
+      const skipOver = Object.fromEntries(WHAT.filter(([k]) => !pp.what[k]).map(([k]) => [k, true]))
+      const r = buildSheetGcode({ sheet, geo, details: dets, thickness: mat.thickness, cnc: { ...cnc, post: post.id }, score: false, outerMode: pp.outer, skipOver: { contour: false, ...skipOver } })
       // для симулятора: заготовка и контур детали в координатах программы (как у листов на странице ЧПУ)
       const view = postView({ ...cnc, post: post.id })
       const z = cornerShift(post.corner, geo.sheetW, geo.sheetL)
       const sx = n0(post.originX) + z.dx, sy = n0(post.originY) + z.dy
-      const outline = partFeatures(sheet.placed[0], mat.details[p.detailIndex], mat.thickness, skipOf(view.ops)).outline.map(([x, y]) => [sx + ox + x, sy + oy + y])
+      const outline = partFeatures(sheet.placed[0], dets[p.detailIndex], mat.thickness, skipOf(view.ops)).outline.map(([x, y]) => [sx + ox + x, sy + oy + y])
       const simData = { text: r.text, kinds: r.kinds, opIds: r.opIds, zShift: r.zShift, thickness: mat.thickness, rapid: n0(post.rapid) || 20000,
         sheet: { x: sx, y: sy, w: geo.sheetW, l: geo.sheetL }, outlines: [outline],
         tools: view.tools || [], head: post.drillHead ? (view.tools || []).filter(t => t.type === 'drill' && t.inHead).map(t => Math.round(n0(t.t))) : [] }
@@ -145,7 +211,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       for (let k = 2; used.has(name); k++) name = `${base}_${k}`
       used.add(name)
       files.push({ name: `${name}.${post.ext || 'nc'}`, data: r.text, sim: simData, time, empty: !!r.empty, label, size: `${Math.round(pw)} × ${Math.round(ph)}`, blank: `${Math.round(pw + 2 * ox)} × ${Math.round(ph + 2 * oy)}`, warnings: r.warnings || [] })
-      if (isTwoSided(row, mat.thickness)) notes.push(`«${label}» — обработка с двух сторон: в программе только лицевая сторона, обратную доприсадить отдельно.`)
+      if (isTwoSided(row, mat.thickness)) notes.push(`«${label}» — обработка с двух сторон: в программе только ${own && orient[id]?.flip ? 'изнанка (деталь перевёрнута)' : 'лицевая сторона'}, другую сторону — отдельной программой (переверните деталь).`)
     }
     setRes({ files, notes })
   }
@@ -183,6 +249,64 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
           </div>
         )
       })()}
+      {/* что выводить и как лежит деталь — свёрнуто; кому не нужно, работает как раньше */}
+      <div style={{ marginTop: 8, border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '6px 10px' }}>
+        <div role="button" tabIndex={0} onClick={() => setPpOpen(v => !v)} onKeyDown={e => { if (e.key === 'Enter') setPpOpen(v => !v) }} style={{ cursor: 'pointer', fontSize: 13, display: 'flex', gap: 6 }}>
+          <span style={{ color: 'var(--text-hint)', width: 12 }}>{ppOpen ? '▼' : '▶'}</span>
+          <span style={{ flex: 1 }}>Что выводить и как лежит деталь</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{pp.place === 'own' ? 'к упору' : 'как в раскрое'} · контур: {OUTER.find(o => o[0] === pp.outer)?.[1].toLowerCase()}{WHAT.some(([k]) => !pp.what[k]) ? ' · есть отключённое' : ''}</span>
+        </div>
+        {ppOpen && (() => {
+          const post = routerPost(cnc)
+          const chip = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text)' })
+          return (
+            <div style={{ marginTop: 8, fontSize: 13 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Внешний контур детали</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{OUTER.map(([k, l]) => <button key={k} type="button" style={chip(pp.outer === k)} onClick={() => setPp({ outer: k })}>{l}</button>)}</div>
+              <Hint>«Не резать» — фрезер как присадочный станок: деталь уже раскроена (на форматнике), делается только обработка. «Только фигурные участки» — радиусы, улыбки, вырезы по краю, с заходом и выходом вдоль прямой стороны.</Hint>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 2px' }}>Обработка</div>
+              {WHAT.map(([k, l]) => (
+                <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!pp.what[k]} onChange={e => setPp({ what: { ...pp.what, [k]: e.target.checked } })} style={{ width: 17, height: 17 }} />{l}
+                </label>
+              ))}
+              <Hint>Отключённое в «Обработке» постпроцессора и так не выводится. Отверстия в торец фрезер не делает.</Hint>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 4px' }}>Как лежит деталь</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" style={chip(pp.place === 'nest')} onClick={() => setPp({ place: 'nest' })}>Как в раскрое</button>
+                <button type="button" style={chip(pp.place === 'own')} onClick={() => setPp({ place: 'own' })}>К упору — свой поворот</button>
+              </div>
+              {pp.place === 'own' && (
+                <>
+                  <Hint>Деталь прижата к нулю станка (синяя точка) с отступом X / Y. Поверните или переверните каждую, как будете класть.</Hint>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0' }}>
+                    <button type="button" style={chip(false)} onClick={() => { setOrient(o => Object.fromEntries(selected.map(id => { const h = findHit(id), dd = h && h.mat.details[h.p.detailIndex]; return [id, { ...(o[id] || {}), rot: dd && n0(dd.width) < n0(dd.length) ? 1 : 0 }] }))); setRes(null) }}>Все длинной стороной вдоль X</button>
+                    <button type="button" style={chip(false)} onClick={() => { setOrient(o => Object.fromEntries(selected.map(id => { const h = findHit(id), dd = h && h.mat.details[h.p.detailIndex]; return [id, { ...(o[id] || {}), rot: dd && n0(dd.width) > n0(dd.length) ? 1 : 0 }] }))); setRes(null) }}>Все длинной стороной вдоль Y</button>
+                  </div>
+                  {selected.map(id => {
+                    const h = findHit(id)
+                    if (!h) return null
+                    const T = n0(h.mat.thickness) || 16, o = orient[id] || {}, pl = ownPlace(h.mat.details[h.p.detailIndex], T, o)
+                    return (
+                      <div key={id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
+                        <PartMini p={pl.p} det={pl.det} T={T} corner={post?.corner} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 500 }}>{nm(id)}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{Math.round(n0(pl.p.origX))} × {Math.round(n0(pl.p.origY))} · {o.flip ? 'изнанкой вверх' : 'лицом вверх'}</div>
+                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            <button type="button" style={chip(false)} onClick={() => setOr(id, { rot: ((o.rot || 0) + 1) % 4 })}>⟳ 90°</button>
+                            <button type="button" style={chip(!!o.flip)} onClick={() => setOr(id, { flip: !o.flip })}>⇅ Перевернуть</button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </>
+              )}
+            </div>
+          )
+        })()}
+      </div>
       <button type="button" className="btn-primary" disabled={!ready || !selected.length} onClick={build} style={{ marginTop: 8 }}>
         {ready ? `Создать УП только на ${selected.length === 1 ? 'эту деталь' : 'эти детали'}` : 'Загружаем настройки ЧПУ…'}
       </button>
