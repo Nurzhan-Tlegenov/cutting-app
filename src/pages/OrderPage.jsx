@@ -47,7 +47,9 @@ export default function OrderPage() {
   const { profile, user, cabinet } = useAuth()
   const inProduction = cabinet === 'production'      // кабинет производства: статусы, ЧПУ, бирки
   const [client, setClient] = useState(null)   // заказчик и производство этого заказа
-  const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
+  // сортировка списка деталей (только показ) — запоминается за аккаунтом, общая с «Списком деталей» раскроя
+  const [sortMode, setSortMode0] = useState(() => getUserSettings(user).detailSort || '')
+  const setSortMode = v => { setSortMode0(v); saveUserSettings({ detailSort: v }, user) }
   const [matFilter, setMatFilter] = useState('') // какой материал показывать в списке
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
   const [order, setOrder] = useState(null)

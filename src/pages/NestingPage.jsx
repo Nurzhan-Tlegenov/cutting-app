@@ -1859,7 +1859,8 @@ export default function NestingPage() {
   const [inModel, setInModel] = useState(null)     // деталь в общей 3D-модели заказа: { focus, scene }
   const [sendJob, setSendJob] = useState(null)     // файл для отладки, который уходит мастер-аккаунту
   const [partsOpen, setPartsOpen] = useKeptState('partsOpen', false)   // список деталей под картами — свёрнут
-  const [partsSort, setPartsSort] = useState('')
+  const [partsSort, setPartsSort0] = useState(() => getUserSettings(user).detailSort || '')   // как в заказе — запоминается
+  const setPartsSort = v => { setPartsSort0(v); saveUserSettings({ detailSort: v }, user) }
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   // «Назад» телефона закрывает редактор контура, открытый с карты (а не уводит со страницы раскроя)
   useBackClose(!!editPart, () => closePartEditor())   // eslint-disable-line no-use-before-define
