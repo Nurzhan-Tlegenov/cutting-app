@@ -1093,7 +1093,8 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
       ...sl,
       '\t\t\t\t</Machines>',
       '\t\t\t\t<EdgeGroup X1="0" Y1="0">',
-      ...[1, 2, 3, 4].map(f => `\t\t\t\t\t<Edge Face="${f}" Thickness="${g(faceEdge[f] > 0 ? faceEdge[f] : 0)}" Pre_Milling="0" X="0" Y="0" CentralAngle="0" />`),
+      // толщина кромки — с одним знаком (как пишет станок: Thickness="1.0")
+      ...[1, 2, 3, 4].map(f => `\t\t\t\t\t<Edge Face="${f}" Thickness="${(faceEdge[f] > 0 ? n0(faceEdge[f]) : 0).toFixed(1)}" Pre_Milling="0" X="0" Y="0" CentralAngle="0" />`),
       '\t\t\t\t</EdgeGroup>',
       '\t\t\t</Panel>',
       '\t\t</Panels>',
