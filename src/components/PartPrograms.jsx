@@ -22,9 +22,9 @@ import CncLoader from './CncLoader'
 import { savedNestings, sheetGeo, dropDetailsFromNesting } from '../lib/savedNesting'
 import { productionDeleteDetails, productionStripDrilling } from '../lib/productionApi'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
-import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { getUserSettings, saveUserSettings, useLabelMode } from '../lib/userSettings'
 import { toLatin } from '../lib/orderUtils'
-import { detailMeta } from '../lib/partLabel'
+import { detailMeta, metaPos, metaDes } from '../lib/partLabel'
 import { isTwoSided } from '../lib/partInfo'
 import SaveFilesDialog from './SaveFilesDialog'
 import QrPartsEditor from './QrPartsEditor'
@@ -138,6 +138,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   const mats = useMemo(() => savedNestings(order, cutDetails(details, parseEdgeTypes(order?.edge_types))), [order, details])
   const [nameQ, setNameQ] = useState(() => ({ ...PART_NAME_DEFAULT, ...(getUserSettings(user).partProg?.name || {}) }))
   const [nameEdit, setNameEdit] = useState(false)
+  const [labelMode] = useLabelMode(user)
   const [busy, setBusy] = useState('')
   const [done, setDone] = useState('')
   // что выводить и где деталь: как в раскрое или «к упору» со своим поворотом / переворотом (запоминается за аккаунтом)
@@ -207,7 +208,12 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
     if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
     return (c?.drillings || []).length > 0
   })
-  const nm = id => { const d = details.find(x => x.id === id); return [detailMeta(d)?.des, d?.name].filter(Boolean).join(' ') || 'Деталь' }
+  // подпись детали — как на картах раскроя: позиция (подпись «Позиция…») или обозначение, затем наименование
+  const nm = id => {
+    const d = details.find(x => x.id === id), m = detailMeta(d)
+    const code = labelMode === 'pos' || labelMode === 'pos_name' ? (metaPos(m) || metaDes(m)) : metaDes(m) || (labelMode === 'name' ? '' : metaPos(m))
+    return [code, d?.name].filter(Boolean).join(' ') || 'Деталь'
+  }
   const list = ids => ids.slice(0, 8).map(nm).join(', ') + (ids.length > 8 ? ` и ещё ${ids.length - 8}` : '')
   // удалить детали из заказа: из карт раскроя они убираются, остальные остаются на своих местах (перекроить — по желанию)
   const delParts = async () => {
