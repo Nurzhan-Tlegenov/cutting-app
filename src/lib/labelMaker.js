@@ -22,6 +22,7 @@ import { edgeThick, parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrow
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
+import { sheetStockNo } from './offcutNo'
 
 // Бирка собирается из элементов: каждый можно поставить в любое место бирки и задать ему размер.
 // Элемент шаблона: { id, type, x, y, w, h (мм), size (высота шрифта, мм), bold, img }.
@@ -63,6 +64,7 @@ export const LABEL_ITEMS = [
   ['qty', 'Количество', 'text'],
   ['image', 'Своя картинка (логотип)', 'text'],
   ['sheet', 'Номер карты', 'text'],
+  ['offcutNo', 'Номер обрезка на складе', 'text'],
   ['num', 'Номер детали на листе', 'text'],
   ['page', 'Номер страницы (по порядку печати)', 'text'],
   ['edgeTop', 'Кромка — сверху', 'text'],
@@ -128,6 +130,7 @@ export const QR_TOKENS = [
   ['SH', 'Ширина'],
   ['T', 'Толщина'],
   ['KARTA', 'Номер карты'],
+  ['OBREZ', 'Номер обрезка на складе'],
   ['NOM', 'Номер детали на листе'],
   ['KOL', 'Количество'],
   ['KLIENT', 'Заказчик'],
@@ -163,6 +166,7 @@ function qrValue(code, info) {
     case 'SH': return r1(info.width)
     case 'T': return info.thickness ? r1(info.thickness) : ''
     case 'KARTA': return info.sheet
+    case 'OBREZ': return info.offcutNo || ''
     case 'NOM': return info.num
     case 'KOL': return info.qty
     case 'KLIENT': return info.client
@@ -653,7 +657,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   return {
     // объединённый раскрой: «Заказ» на бирке — заказ самой детали (mergeOrders.js → meta.srcOrder)
     order: m.srcOrder?.id ? (m.srcOrder.name || m.srcOrder.number || '') : orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
-    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, client: CLIENTS.get(order?.id) || order?._client || '',
+    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, offcutNo: sheetStockNo(mat.sheets?.[si], order), client: CLIENTS.get(order?.id) || order?._client || '',
     orderName: m.srcOrder?.id ? String(m.srcOrder.name || '').trim() : String(order?.order_name || '').trim(), orderNumber: m.srcOrder?.id ? (m.srcOrder.number || '') : (order?.order_number || ''),
     // артикул заказа: из карточки заказа, а если там пусто — из модели (Базис: свойства модели → «Артикул»)
     article: String((m.srcOrder?.id ? m.srcOrder.article : order?.order_article) || m.article || '').trim(),
@@ -926,7 +930,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 /** Текст элемента бирки */
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
-export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
+export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', offcutNo: 'Обрезок №', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
   endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 /** Элементы бирки про пазы — у них есть «С изнанки — в обратных цветах» */
 export const GROOVE_TYPES = ['grooves', 'grooveDims', 'grooveSpan']
@@ -961,6 +965,8 @@ function labelValue(type, info, tpl = null) {
     case 'curved': return info.curved.length ? info.curved.join('; ') : ''
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
     case 'sheet': return String(info.sheet)
+    // деталь лежит на обрезке со склада — его номер (на целом листе пусто, элемент не печатается)
+    case 'offcutNo': return info.offcutNo || ''
     case 'num': return String(info.num)
     // номер бирки в общем PDF (страница): кончилась лента в принтере — видно, с какой страницы печатать дальше
     case 'page': return info.page ? (info.pages ? `${info.page}/${info.pages}` : String(info.page)) : ''

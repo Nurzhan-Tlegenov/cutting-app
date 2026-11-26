@@ -14,6 +14,7 @@ import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import OffcutOwner from '../components/OffcutOwner'
 import { syncOrderRemnants, stockUseOrder, nestingRemnants } from '../lib/stock'
+import { sheetStockNo } from '../lib/offcutNo'
 import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -661,7 +662,7 @@ export default function CncPage() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
                     <input type="checkbox" checked={on} onChange={() => toggle(i)} style={{ width: 20, height: 20, flex: '0 0 auto' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {i + 1}
+                      <div style={{ fontSize: 14, fontWeight: 500 }}>{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {i + 1}{sheetStockNo(sh, order) ? ` · склад №${sheetStockNo(sh, order)}` : ''}
                         {f?.risks?.length > 0 && <span style={{ marginLeft: 8, fontSize: 11.5, fontWeight: 500, color: '#B35F00', background: '#FFF1E0', borderRadius: 10, padding: '1px 7px' }}>⚠ рискованных: {f.risks.length}</span>}
                         {f?.twoPass?.length > 0 && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 500, color: '#5B3FA8', background: '#EEEAFB', borderRadius: 10, padding: '1px 7px' }}>✂ в 2 прохода: {f.twoPass.length}</span>}
                         {f?.edited && <span style={{ marginLeft: 6, fontSize: 11.5, color: 'var(--blue)' }}>✎ порядок изменён</span>}</div>

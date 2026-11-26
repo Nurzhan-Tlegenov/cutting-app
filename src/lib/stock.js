@@ -65,7 +65,8 @@ export const sizeText = r => `${mm(r.length)} × ${mm(r.width)}`
 export const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0 }
 
 // материал без толщины, регистра и лишних пробелов — для поиска и подбора «похожих»
-export const normMaterial = s => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/\b\d+([.,]\d+)?\s*(мм|mm)\b/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+// толщина «16 мм» / «16мм» убирается (\b с кириллицей не работает — граница через пробел / начало / конец строки)
+export const normMaterial = s => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/(^|[^\p{L}\p{N}])\d+([.,]\d+)?\s*(мм|mm)(?=$|[^\p{L}\p{N}])/gu, '$1 ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
 const dt = iso => { try { return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
 export const dateText = dt

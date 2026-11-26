@@ -1573,14 +1573,17 @@ function parseOffcuts(raw, defMargin = '10') {
   let o = raw
   if (typeof raw === 'string') { try { o = JSON.parse(raw) } catch { o = null } }
   const items = Array.isArray(o?.items)
-    ? o.items.map(it => ({ length: String(it.length ?? ''), width: String(it.width ?? ''), qty: String(it.qty ?? '1'), ...(it.stock ? { stock: it.stock } : {}) }))
+    ? o.items.map(it => ({ length: String(it.length ?? ''), width: String(it.width ?? ''), qty: String(it.qty ?? '1'), ...(it.stock ? { stock: it.stock } : {}), ...(it.mat ? { mat: it.mat } : {}) }))
     : []
   // у заказа отступ ещё не задан — последний, который пользователь ставил сам (идёт за аккаунтом)
   return { margin: o?.margin != null && (items.length || Number(o.margin) !== 10) ? String(o.margin) : defMargin, items }
 }
+// заказ из нескольких материалов: обрезок привязан к материалу (mat — ключ материала), раскраивается только в нём;
+// без привязки (старые заказы, один материал) — во всех
+const offcutsOfMat = (form, mk) => (mk == null ? form : { ...form, items: form.items.filter(it => !it.mat || it.mat === mk) })
 function offcutsValue(form) {
   const items = form.items
-    .map(it => ({ length: Number(it.length) || 0, width: Number(it.width) || 0, qty: Math.max(0, Math.floor(Number(it.qty) || 0)), ...(it.stock ? { stock: it.stock } : {}) }))
+    .map(it => ({ length: Number(it.length) || 0, width: Number(it.width) || 0, qty: Math.max(0, Math.floor(Number(it.qty) || 0)), ...(it.stock ? { stock: it.stock } : {}), ...(it.mat ? { mat: it.mat } : {}) }))
     .filter(it => it.length > 0 && it.width > 0 && it.qty > 0)
   return { margin: Math.max(0, Number(String(form.margin).replace(',', '.')) || 0), items }
 }
@@ -1814,6 +1817,7 @@ export default function NestingPage() {
   const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
   const badContours = useMemo(() => allDetails.map(d => ({ d, m: contourMismatch(d.contour, d.width, d.length) })).filter(x => x.m), [allDetails])
   const multiMat = materials.length > 1
+  const offMk = multiMat ? ((materials.find(m => m.key === matKey) || materials[0])?.key ?? null) : null   // обрезки со склада — свои у каждого материала
   // В раскрой деталь идёт заготовкой: с учётом подрезки на толщину кромки и прифуговки (edgeCut.js).
   // allDetails — строки заказа как есть (их правим и сохраняем), details — заготовки; исходная строка — rawDetail(d).
   // виды кромки заказа (из бланка: настройки видов + то, что стоит на деталях) — для выбора в редакторе контура
@@ -2480,7 +2484,7 @@ export default function NestingPage() {
       marginT: order.margin_top, marginR: order.margin_right,
       marginB: order.margin_bottom, marginL: order.margin_left,
       kerf: order.kerf_width,
-      offcuts: offcutsValue(offForm),
+      offcuts: offcutsValue(offcutsOfMat(offForm, offMk)),
       smallPartsToCenter: cfg.small && !smallRuleOff(details, cfg),
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
@@ -2786,7 +2790,10 @@ export default function NestingPage() {
   async function saveNesting(cfg) {
     if (!cfg?.result) return
     // Пустые листы (все детали унесли в буфер/на другие листы) не сохраняем
-    const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
+    // лист-обрезок помнит номер остатка склада (бирки, карта, резерв по всем материалам заказа)
+    const offIt = offcutsValue(offcutsOfMat(offForm, offMk)).items
+    const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i,
+      ...(sh.stock === 'offcut' ? { stockId: offIt[sh.offcutItem]?.stock || null } : {}) }))
     const result = { ...cfg.result }
     delete result.rawSheets           // служебная копия раскладки до дозаполнения — в заказе не нужна
     const toSave = {
@@ -2797,18 +2804,20 @@ export default function NestingPage() {
     // не сохранилось (например, предел раскроев) — дальше не идём: ни выбора, ни ЧПУ, ни отправки
     if (!(await writeSaved(next, toSave))) return null
     if (multiMat) setSavedByMat(next)
-    await reserveStock(sheets)
+    await reserveStock(multiMat ? Object.values(next).flatMap(v => v?.sheets || []) : sheets)
     return next
   }
   // Остатки со склада, на которые лёг раскрой, резервируются за заказом (прежний резерв снимается). Лист-обрезок
   // знает свой обрезок (offcutItem — номер в списке «Обрезков со склада»)
+  // заказ из нескольких материалов — резерв по раскроям ВСЕХ материалов (раньше сохранение второго материала снимало
+  // резерв первого, и при выпуске программ списывать было нечего)
   async function reserveStock(sheets) {
     const ov = offcutsValue(offForm)
     const used = new Map()
     for (const sh of sheets) {
       if (sh.stock !== 'offcut') continue
-      const it = ov.items[sh.offcutItem]
-      if (it?.stock) used.set(it.stock, (used.get(it.stock) || 0) + 1)
+      const sid = sh.stockId !== undefined ? sh.stockId : ov.items[sh.offcutItem]?.stock
+      if (sid) used.set(sid, (used.get(sid) || 0) + 1)
     }
     if (!used.size && !hadStockRef.current) return
     hadStockRef.current = used.size > 0
@@ -3293,12 +3302,15 @@ export default function NestingPage() {
   const edgeByType = edgeSum.byName
   const totalEdge = edgeSum.total
   const offcutCount = sheetsData.filter(sh => sh.stock === 'offcut').length
+  // номер остатка склада у листа-обрезка (сохранённый раскрой помнит его сам, свежий — по списку обрезков материала)
+  const offStockItems = offcutsValue(offcutsOfMat(offForm, offMk)).items
+  const stockNoOf = sh => (sh?.stock !== 'offcut' ? '' : sh.stockId !== undefined ? (sh.stockId || '') : (offStockItems[sh.offcutItem]?.stock || ''))
   const sheetsCount = sheetsData.length - offcutCount
   const totalArea = result ? sheetsData.reduce((a, sh) => { const g = geoOf(order, result, sh); return a + g.usableX * g.usableY / 1e6 }, 0) : 0
   const curParamsKeyFor = byBox => paramsKey({
     byBox, sheetL: order.sheet_length, sheetW: order.sheet_width, kerf: order.kerf_width,
     marginT: order.margin_top, marginR: order.margin_right, marginB: order.margin_bottom, marginL: order.margin_left,
-    offcuts: offcutsValue(offForm),
+    offcuts: offcutsValue(offcutsOfMat(offForm, offMk)),
   })
   const focusIdx = focus ? configs.indexOf(focus) : -1
   // Какая конфигурация показывает карты в левой колонке (компьютер): выбранная пользователем, иначе та, что считается,
@@ -3789,7 +3801,7 @@ export default function NestingPage() {
                       </button>
                       <button onClick={() => !locked && openSheet(cfg.activeSheet)} disabled={locked}
                         style={{ ...chip(view === 'sheet', 'var(--blue)'), padding: '3px 10px', opacity: locked ? 0.5 : 1 }}>
-                        {canvasSheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} {cfg.activeSheet + 1}
+                        {canvasSheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} {cfg.activeSheet + 1}{stockNoOf(canvasSheet) ? ` · склад №${stockNoOf(canvasSheet)}` : ''}
                       </button>
                     </div>
                     <div style={{ flex: 1 }} />
@@ -3942,7 +3954,7 @@ export default function NestingPage() {
                     {(() => { const same = cfg.result?.beamSaw && cfg.result.beamSettings?.mergeSame !== false ? sameMaps(cfg.sheetsData) : null; return cfg.sheetsData.map((sh, i) => (
                       <button key={i} onClick={() => openSheet(i)} title={same && same[i].first !== i ? `Такая же карта, как лист ${same[i].first + 1}` : same && same[i].count > 1 ? `Эта карта режется ${same[i].count} раза` : undefined}
                         style={chip(view === 'sheet' && cfg.activeSheet === i, 'var(--blue)')}>
-                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1}{sameMapTag(same, i)} · {sh.placed.length ? sh.placed.length : 'пусто'}
+                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1}{stockNoOf(sh) ? ` №${stockNoOf(sh)}` : ''}{sameMapTag(same, i)} · {sh.placed.length ? sh.placed.length : 'пусто'}
                       </button>
                     )) })()}
                   </div>
@@ -4234,8 +4246,9 @@ export default function NestingPage() {
               style={{ ...inp, opacity: isLocked(key) ? 0.55 : 1 }} />
           </label>
         )
-        const ov = offcutsValue(offForm)
+        const ov = offcutsValue(offcutsOfMat(offForm, offMk))
         const offN = ov.items.reduce((a, it) => a + it.qty, 0)
+        const offOther = offMk == null ? 0 : offForm.items.filter(it => it.mat && it.mat !== offMk).length
         const setItem = (i, k, v) => setOffForm(f => ({ ...f, items: f.items.map((it, j) => j === i ? { ...it, [k]: v } : it) }))
         const summary = `${order.sheet_length}×${order.sheet_width} · рез ${order.kerf_width} · отступы ${order.margin_left}/${order.margin_right}/${order.margin_top}/${order.margin_bottom}`
           + (offN ? ` · обрезков ${offN}` : '') + (prod ? ` · ${prod.name}` : '')
@@ -4342,11 +4355,12 @@ export default function NestingPage() {
                   <Hint>
                     Раскраиваются первыми (крупные — раньше), как отдельные листы. На целые листы идёт то, что не поместилось.
                   </Hint>
-                  {offForm.items.map((it, i) => (
+                  {offOther > 0 && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Ещё {offOther} — у других материалов заказа (переключите материал)</div>}
+                  {offForm.items.map((it, i) => offMk != null && it.mat && it.mat !== offMk ? null : (
                     <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-end', marginBottom: 6 }}>
                       {[['length', 'Длина, мм'], ['width', 'Ширина, мм'], ['qty', 'Шт.']].map(([k, t]) => (
                         <label key={k} style={{ ...lbl, flex: k === 'qty' ? '0 0 52px' : 1 }}>
-                          {i === 0 ? t : ''}
+                          {i === offForm.items.findIndex(x => offMk == null || !x.mat || x.mat === offMk) ? t : ''}
                           <input type="text" inputMode="numeric" value={it[k]} disabled={offLocked || (it.stock && k !== 'qty')}
                             title={it.stock ? `Остаток №${it.stock} со склада` : undefined}
                             onChange={e => setItem(i, k, e.target.value.replace(/[^0-9]/g, ''))}
@@ -4363,7 +4377,7 @@ export default function NestingPage() {
                   ))}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <button disabled={offLocked}
-                      onClick={() => setOffForm(f => ({ ...f, items: [...f.items, { length: '', width: '', qty: '1' }] }))}
+                      onClick={() => setOffForm(f => ({ ...f, items: [...f.items, { length: '', width: '', qty: '1', ...(offMk != null ? { mat: offMk } : {}) }] }))}
                       style={{ flex: 1, padding: 7, borderRadius: 'var(--radius)', border: '0.5px dashed var(--border-md)',
                         background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                       + Добавить обрезок
@@ -4661,12 +4675,15 @@ export default function NestingPage() {
       {stockPick && order && (() => {
         const sp = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id)
         if (!sp) return null
-        const curMat = (materials.find(m => m.key === matKey) || materials[0])?.name || order.material_name || ''
-        const taken = new Set(offForm.items.map(it => it.stock).filter(Boolean))
+        // материал, который сейчас раскраивается: у материалов заказа название — в ключе «название|толщина» (поля name нет —
+        // раньше в заказе из нескольких материалов подставлялся общий материал заказа, и остатки не находились)
+        const cm = materials.find(m => m.key === matKey) || materials[0]
+        const curMat = (multiMat && cm ? String(cm.key).split('|')[0] : '') || cm?.name || order.material_name || ''
+        const taken = new Set(offForm.items.map(it => it.stock).filter(Boolean))   // взятые в любом материале заказа
         return <StockPicker prodId={sp.id} prodName={sp.name} orderId={order.id} material={curMat} taken={taken} onClose={() => setStockPick(false)}
           onPick={items => {
             const keep = offForm.items.filter(it => it.length !== '' || it.width !== '')
-            const f = { ...offForm, items: [...keep, ...items.map(x => ({ length: String(x.length), width: String(x.width), qty: String(x.qty), stock: x.stock }))] }
+            const f = { ...offForm, items: [...keep, ...items.map(x => ({ length: String(x.length), width: String(x.width), qty: String(x.qty), stock: x.stock, ...(offMk != null ? { mat: offMk } : {}) }))] }
             setOffForm(f); commitOffcuts(f); setStockPick(false)
             setOffImport(`Со склада: ${items.length} остатк${items.length === 1 ? '' : 'ов'}. Нажмите «Рассчитать» заново — остатки раскраиваются первыми.`)
           }} />

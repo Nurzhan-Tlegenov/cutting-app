@@ -1,4 +1,5 @@
 // Карты раскроя в PDF: лист на страницу — крупная схема листа (детали с номерами позиций, размерами по сторонам
+import { sheetStockNo } from './offcutNo'
 // и кромкой), справа колонкой список деталей листа (позиция, длина, ширина, количество; кромка — чертами под размером:
 // одна черта — закромлена одна сторона, две — обе), под схемой — сведения о листе, процент использования и метраж кромки.
 // Страница рисуется на canvas (так кириллица и линии получаются чёткими без встраивания шрифтов) и кладётся
@@ -438,7 +439,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
     const tx = drawBrand(ctx) + 4
     // «Лист N из M» — справа; заголовок занимает место до него
-    const sheetTxt = `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${cont ? ' (продолжение)' : ''}`
+    const sheetTxt = `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${sheetStockNo(sheets[si], order) ? ` · склад №${sheetStockNo(sheets[si], order)}` : ''}${cont ? ' (продолжение)' : ''}`
     ctx.font = `600 ${mm(5)}px Arial, Helvetica, sans-serif`
     const sw = ctx.measureText(sheetTxt).width / K
     text(ctx, sheetTxt, 200, 14.5, { size: 5, bold: true, align: 'right' })
@@ -502,7 +503,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       edgeTypesSheet: ['Кромка по видам', byType(edges[si])], edgeTypesAll: ['Кромка по видам, всего', byType(edgeAll)],
       orderNote: ['Примечание', String(order?.order_note || '').trim()], prodNote: ['Примечание производства', String(order?.prod_note || '').trim()],
       title: ['', `Карта раскроя · ${orderTitle(order)}`], order: ['Заказ', orderTitle(order)],
-      sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${same && same[si].first !== si ? ` · карта как лист ${same[si].first + 1}` : same && same[si].count > 1 ? ` · карта ×${same[si].count}` : ''}`],
+      sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${sheetStockNo(sheet, order) ? ` · склад №${sheetStockNo(sheet, order)}` : ''}${same && same[si].first !== si ? ` · карта как лист ${same[si].first + 1}` : same && same[si].count > 1 ? ` · карта ×${same[si].count}` : ''}`],
       material: ['Материал', matName], date: ['Дата', new Date().toLocaleDateString('ru-RU')],
       used: ['Использовано материала', `${Math.round(area > 0 ? used[si] / area * 100 : 0)} %`],
       sheetSize: ['Лист, мм', `${fmt(geo.sheetL)} × ${fmt(geo.sheetW)}`], usable: ['Рабочая область, мм', `${fmt(geo.usableY)} × ${fmt(geo.usableX)}`],
@@ -667,7 +668,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
         for (let si = from; si < Math.min(sheets.length, from + PER); si++) {
           y += ROW
           const g = geos[si], sh = sheets[si], area = g.usableX * g.usableY
-          const v = [`${sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1}${same && same[si].first !== si ? ` (как ${same[si].first + 1})` : ''}`, `${fmt(g.sheetL)} × ${fmt(g.sheetW)}`,
+          const v = [`${sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1}${sheetStockNo(sh, order) ? ` №${sheetStockNo(sh, order)}` : ''}${same && same[si].first !== si ? ` (как ${same[si].first + 1})` : ''}`, `${fmt(g.sheetL)} × ${fmt(g.sheetW)}`,
             `${Math.round(area > 0 ? used[si] / area * 100 : 0)} %`, String(sh.placed.length), m2(used[si] / 1e6), m2(edges[si].total),
             (sh.manualOffcuts || []).map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')]
           cols.forEach(([, x, a], ci) => text(ctx, v[ci], x, y, { size: 3, bold: ci === 0 || ci === 2, align: a, ...(ci === 6 ? { max: 46, color: MUTED } : {}) }))
@@ -683,7 +684,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     sheets.forEach((sheet, si) => {
       const { rows } = sheetRows(sheet, details)
       if (y + 5 + 6 + LROW > LIST_BOTTOM) next()
-      const title = `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} · ${sheet.placed.length} дет.`
+      const title = `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1}${sheetStockNo(sheet, order) ? ` (склад №${sheetStockNo(sheet, order)})` : ''} · ${sheet.placed.length} дет.`
       ops.push({ page, col, y, kind: 'title', t: title }); y += 5
       ops.push({ page, col, y, kind: 'head' }); y += 6
       for (const r of rows) {
