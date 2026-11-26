@@ -4,7 +4,7 @@
 // Программа — тем же генератором и по тем же настройкам постпроцессора и «Обработки» (в т.ч. «Выводить в УП»), что и
 // программы листов. Деталь стоит как в раскрое (тот же поворот), «лист» — заготовка «деталь + отступ с каждой стороны»:
 // обработка начинается с отступа X / Y от нуля станка. Отступы — настройка аккаунта (запоминаются).
-import { useMemo, useState, Suspense } from 'react'
+import { useEffect, useMemo, useState, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCnc } from '../hooks/useCnc'
@@ -81,10 +81,10 @@ function ownPlace(det, T, o) {
   return { det: d, p: { detailIndex: 0, x: 0, y: 0, origX: pw, origY: ph, w: pw, h: ph, rotation: rot * 90, rotated: odd, label: d.name, ...(polygon ? { polygon } : {}) } }
 }
 /** Миниатюра: деталь как ляжет на станок, отверстия и вырезы, угол нуля (упор) */
-function PartMini({ p, det, T, corner, w = 150 }) {
+function PartMini({ p, det, T, corner, w = 150, h: hMax = 90 }) {
   let f
   try { f = partFeatures(p, det, T) } catch { return null }
-  const pw = n0(p.origX), ph = n0(p.origY), pad = 8, k = Math.min((w - 2 * pad) / (pw || 1), 90 / (ph || 1))
+  const pw = n0(p.origX), ph = n0(p.origY), pad = 8, k = Math.min((w - 2 * pad) / (pw || 1), (hMax - 2 * pad) / (ph || 1))
   const X = x => pad + x * k, Y = y => pad + (ph - y) * k, H = ph * k + 2 * pad
   const c = cornerOf(corner), cx = c === 'br' || c === 'tr' ? X(pw) : X(0), cy = c === 'tl' || c === 'tr' ? Y(ph) : Y(0)
   return (
@@ -100,7 +100,7 @@ function PartMini({ p, det, T, corner, w = 150 }) {
   )
 }
 
-export default function PartPrograms({ order, details, selected, onClear, onChanged, canProg = true }) {
+export default function PartPrograms({ order, details, selected, onClear, onChanged, canProg = true , fullSig = 0}) {
   const { user } = useAuth()
   const { cnc, ready } = useCnc(null, order?.production_id || null)
   const [off, setOff] = useState(() => ({ x: 10, y: 10, ...(getUserSettings(user).partProg || {}) }))
@@ -131,6 +131,16 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
   const setOr = (id, patch) => { setOrient(o => ({ ...o, [id]: { ...effOf(id), ...(o[id] || {}), ...patch } })); setRes(null) }
   const setPo = patch => setPp({ po: { ...po, ...patch } })
   const [ppOpen, setPpOpen] = useState(false)
+  // во весь экран: большой просмотр детали + список деталей и настройки справа («Выбрать детали с обработкой» открывает сразу)
+  const [full, setFull] = useState(false)
+  const [act, setAct] = useState(null)
+  useEffect(() => { if (fullSig > 0) Promise.resolve().then(() => { setFull(true); setPpOpen(true) }) }, [fullSig])
+  useEffect(() => {
+    if (!full) return
+    const k = e => { if (e.key === 'Escape') setFull(false) }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [full])
   // у скольких выбранных деталей есть присадка (отверстия в пласть и в торец)
   const drilled = selected.filter(id => {
     const d = details.find(x => x.id === id)
@@ -234,12 +244,116 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
     setRes({ files, notes })
   }
 
+
+  const chipS = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text)' })
+  // положение детали для просмотра: «к упору» — своё, иначе как в раскрое
+  const viewOf = id => {
+    const h = findHit(id)
+    if (!h) return null
+    const T = n0(h.mat.thickness) || 16
+    if (pp.place === 'own') { const o = effOf(id), pl = ownPlace(h.mat.details[h.p.detailIndex], T, o); return { ...pl, T, o, hand: !!orient[id] } }
+    return { p: h.p, det: h.mat.details[h.p.detailIndex], T, o: null, hand: false }
+  }
+  const partBtns = (id, o, hand, chip = chipS) => (
+    <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+      <button type="button" style={chip(false)} onClick={() => setOr(id, { rot: ((o.rot || 0) + 1) % 4 })}>⟳ 90°</button>
+      <button type="button" style={chip(!!o.flip)} onClick={() => setOr(id, { flip: !o.flip })}>⇅ Перевернуть</button>
+      {hand && <button type="button" style={chip(false)} onClick={() => { setOrient(x => { const n = { ...x }; delete n[id]; return n }); setRes(null) }}>Сброс</button>}
+    </div>
+  )
+  function partRows(chip) {
+    return selected.map(id => {
+      const h = findHit(id)
+      if (!h) return null
+      const T = n0(h.mat.thickness) || 16, o = effOf(id), hand = !!orient[id], pl = ownPlace(h.mat.details[h.p.detailIndex], T, o)
+      return (
+        <div key={id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
+          <PartMini p={pl.p} det={pl.det} T={T} corner={pp.stops} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 500 }}>{nm(id)}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{Math.round(n0(pl.p.origX))} × {Math.round(n0(pl.p.origY))} · {o.flip ? 'изнанкой вверх' : 'лицом вверх'} · {hand ? <span style={{ color: 'var(--amber)' }}>вручную</span> : 'по правилам'}</div>
+            {partBtns(id, o, hand, chip)}
+          </div>
+        </div>
+      )
+    })
+  }
+  function settingsEl(withList) {
+          const chip = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text)' })
+    return (
+      <div style={{ marginTop: 8, fontSize: 13 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Внешний контур детали</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{OUTER.map(([k, l]) => <button key={k} type="button" style={chip(pp.outer === k)} onClick={() => setPp({ outer: k })}>{l}</button>)}</div>
+        <Hint>«Не резать» — фрезер как присадочный станок: деталь уже раскроена (на форматнике), делается только обработка. «Только фигурные участки» — радиусы, улыбки, вырезы по краю, с заходом и выходом вдоль прямой стороны.</Hint>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 2px' }}>Обработка</div>
+        {WHAT.map(([k, l]) => (
+          <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!pp.what[k]} onChange={e => setPp({ what: { ...pp.what, [k]: e.target.checked } })} style={{ width: 17, height: 17 }} />{l}
+          </label>
+        ))}
+        <Hint>Отключённое в «Обработке» постпроцессора и так не выводится. Отверстия в торец фрезер не делает.</Hint>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 4px' }}>Как лежит деталь</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" style={chip(pp.place === 'nest')} onClick={() => setPp({ place: 'nest' })}>Как в раскрое</button>
+          <button type="button" style={chip(pp.place === 'own')} onClick={() => setPp({ place: 'own' })}>К упору — свой поворот</button>
+        </div>
+        {pp.place === 'own' && (
+          <>
+            <Hint>Деталь прижата к Г-образному упору (синяя точка — его угол) с отступом X / Y. Положение выбирается по правилам — сверху важнее; поворот или переворот руками — своё положение детали.</Hint>
+            <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', margin: '4px 0 6px' }}>
+              <div style={{ fontSize: 12, fontWeight: 500, margin: '2px 0' }}>Упоры (Г-образный) — где они у станка</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>{STOPS.map(([k, l]) => <button key={k} type="button" style={{ ...chip(cornerOf(pp.stops) === k), padding: '3px 9px', fontSize: 11.5 }} onClick={() => setPp({ stops: k })}>{l}</button>)}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Ноль программы — в углу упоров. Своя настройка: угол укладки листов в постпроцессоре не меняется.</div>
+              <div style={{ fontSize: 12, fontWeight: 500, margin: '6px 0 2px' }}>Правила положения</div>
+              {po.order.map((k, i, arr) => {
+                const dirs = k === 'cutouts' || k === 'holes' ? [['away', 'от упоров'], ['to', 'к упорам']] : k === 'grooves' || k === 'long' ? [['x', 'X'], ['y', 'Y']] : null
+                return (
+                  <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none', opacity: k === 'faceUp' && !po.allowFlip ? 0.55 : 1 }}>
+                    <input type="checkbox" checked={!!po.on[k]} onChange={e => setPo({ on: { ...po.on, [k]: e.target.checked } })} style={{ width: 16, height: 16 }} />
+                    <span style={{ flex: 1, minWidth: 140, fontSize: 12.5 }}>{i + 1}. {PO_RULES[k]}{k === 'faceUp' && !po.allowFlip ? ' — нужен переворот' : ''}</span>
+                    {dirs && po.on[k] && dirs.map(([v, l]) => <button key={v} type="button" style={{ ...chip(po.dir[k] === v), padding: '3px 8px', fontSize: 11.5 }} onClick={() => setPo({ dir: { ...po.dir, [k]: v } })}>{l}</button>)}
+                    <button type="button" disabled={i === 0} title="Выше (важнее)" onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setPo({ order: o }) }} style={{ padding: '2px 8px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === 0 ? 'var(--text-hint)' : 'var(--text)' }}>↑</button>
+                    <button type="button" disabled={i === arr.length - 1} title="Ниже" onClick={() => { const o = [...arr]; [o[i + 1], o[i]] = [o[i], o[i + 1]]; setPo({ order: o }) }} style={{ padding: '2px 8px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === arr.length - 1 ? 'var(--text-hint)' : 'var(--text)' }}>↓</button>
+                  </div>
+                )
+              })}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '4px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!po.allowFlip} onChange={e => setPo({ allowFlip: e.target.checked })} style={{ width: 16, height: 16 }} />
+                Разрешить переворот изнанкой вверх
+              </label>
+            </div>
+            {Object.keys(orient).some(id => selected.includes(id)) && <button type="button" style={{ ...chip(false), marginBottom: 4 }} onClick={() => { setOrient({}); setRes(null) }}>Сбросить ручное положение у всех</button>}
+            {withList && partRows(chip)}
+          </>
+        )}
+      </div>
+    )
+  }
+  function resultsEl() {
+    return res && (
+        <div style={{ marginTop: 8 }}>
+          {res.files.map(f => (
+            <div key={f.name} style={{ fontSize: 12.5, padding: '5px 0', borderTop: '0.5px solid var(--border)' }}>
+              <b>{f.label}</b> · деталь {f.size} · заготовка не меньше {f.blank}{f.time ? ` · ≈ ${fmtTime(f.time)}` : ''} <span style={{ color: 'var(--text-hint)' }}>· {f.name}</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                {!f.empty && <button type="button" onClick={() => setSim(f)} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', cursor: 'pointer' }}>▶ Симулятор</button>}
+                <button type="button" onClick={() => download(f.name, f.data)} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>⬇ Скачать</button>
+              </div>
+              {f.warnings.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: 'var(--amber)' }}>⚠ {w}</div>)}
+            </div>
+          ))}
+          {res.notes.map((n, i) => <div key={i} style={{ fontSize: 12, color: 'var(--amber)', marginTop: 4 }}>⚠ {n}</div>)}
+          {res.files.length > 0 && <button type="button" className="btn-primary" onClick={() => setSave(true)} style={{ marginTop: 8, background: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить {res.files.length === 1 ? 'программу' : `программы (${res.files.length})`}</button>}
+        </div>
+      )
+  }
   const inp = { width: 70, padding: '6px 8px', textAlign: 'center' }
   return (
     <div style={{ position: 'sticky', bottom: 72, zIndex: 30, marginTop: 8, padding: '10px 12px', borderRadius: 'var(--radius-lg)', background: 'var(--bg)', border: '1px solid var(--blue)', boxShadow: '0 4px 14px rgba(0,0,0,.12)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 14 }}>Выбрано деталей: {selected.length}</b>
         <span style={{ flex: 1 }} />
+        {canProg && <button type="button" onClick={() => { setFull(true); setPpOpen(true) }} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>⛶ Во весь экран</button>}
         <button type="button" onClick={onClear} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Снять выбор</button>
       </div>
       {/* программы на отдельные детали — только для раскроя на фрезере (у пильного центра — только удалить) */}
@@ -274,75 +388,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
           <span style={{ flex: 1 }}>Что выводить и как лежит деталь</span>
           <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{pp.place === 'own' ? 'к упору' : 'как в раскрое'} · контур: {OUTER.find(o => o[0] === pp.outer)?.[1].toLowerCase()}{WHAT.some(([k]) => !pp.what[k]) ? ' · есть отключённое' : ''}</span>
         </div>
-        {ppOpen && (() => {
-          const chip = on => ({ padding: '5px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text)' })
-          return (
-            <div style={{ marginTop: 8, fontSize: 13 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Внешний контур детали</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{OUTER.map(([k, l]) => <button key={k} type="button" style={chip(pp.outer === k)} onClick={() => setPp({ outer: k })}>{l}</button>)}</div>
-              <Hint>«Не резать» — фрезер как присадочный станок: деталь уже раскроена (на форматнике), делается только обработка. «Только фигурные участки» — радиусы, улыбки, вырезы по краю, с заходом и выходом вдоль прямой стороны.</Hint>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 2px' }}>Обработка</div>
-              {WHAT.map(([k, l]) => (
-                <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!!pp.what[k]} onChange={e => setPp({ what: { ...pp.what, [k]: e.target.checked } })} style={{ width: 17, height: 17 }} />{l}
-                </label>
-              ))}
-              <Hint>Отключённое в «Обработке» постпроцессора и так не выводится. Отверстия в торец фрезер не делает.</Hint>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 4px' }}>Как лежит деталь</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button type="button" style={chip(pp.place === 'nest')} onClick={() => setPp({ place: 'nest' })}>Как в раскрое</button>
-                <button type="button" style={chip(pp.place === 'own')} onClick={() => setPp({ place: 'own' })}>К упору — свой поворот</button>
-              </div>
-              {pp.place === 'own' && (
-                <>
-                  <Hint>Деталь прижата к Г-образному упору (синяя точка — его угол) с отступом X / Y. Положение выбирается по правилам — сверху важнее; поворот или переворот руками — своё положение детали.</Hint>
-                  <div style={{ border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', margin: '4px 0 6px' }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, margin: '2px 0' }}>Упоры (Г-образный) — где они у станка</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>{STOPS.map(([k, l]) => <button key={k} type="button" style={{ ...chip(cornerOf(pp.stops) === k), padding: '3px 9px', fontSize: 11.5 }} onClick={() => setPp({ stops: k })}>{l}</button>)}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Ноль программы — в углу упоров. Своя настройка: угол укладки листов в постпроцессоре не меняется.</div>
-                    <div style={{ fontSize: 12, fontWeight: 500, margin: '6px 0 2px' }}>Правила положения</div>
-                    {po.order.map((k, i, arr) => {
-                      const dirs = k === 'cutouts' || k === 'holes' ? [['away', 'от упоров'], ['to', 'к упорам']] : k === 'grooves' || k === 'long' ? [['x', 'X'], ['y', 'Y']] : null
-                      return (
-                        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none', opacity: k === 'faceUp' && !po.allowFlip ? 0.55 : 1 }}>
-                          <input type="checkbox" checked={!!po.on[k]} onChange={e => setPo({ on: { ...po.on, [k]: e.target.checked } })} style={{ width: 16, height: 16 }} />
-                          <span style={{ flex: 1, minWidth: 140, fontSize: 12.5 }}>{i + 1}. {PO_RULES[k]}{k === 'faceUp' && !po.allowFlip ? ' — нужен переворот' : ''}</span>
-                          {dirs && po.on[k] && dirs.map(([v, l]) => <button key={v} type="button" style={{ ...chip(po.dir[k] === v), padding: '3px 8px', fontSize: 11.5 }} onClick={() => setPo({ dir: { ...po.dir, [k]: v } })}>{l}</button>)}
-                          <button type="button" disabled={i === 0} title="Выше (важнее)" onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setPo({ order: o }) }} style={{ padding: '2px 8px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === 0 ? 'var(--text-hint)' : 'var(--text)' }}>↑</button>
-                          <button type="button" disabled={i === arr.length - 1} title="Ниже" onClick={() => { const o = [...arr]; [o[i + 1], o[i]] = [o[i], o[i + 1]]; setPo({ order: o }) }} style={{ padding: '2px 8px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === arr.length - 1 ? 'var(--text-hint)' : 'var(--text)' }}>↓</button>
-                        </div>
-                      )
-                    })}
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '4px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={!!po.allowFlip} onChange={e => setPo({ allowFlip: e.target.checked })} style={{ width: 16, height: 16 }} />
-                      Разрешить переворот изнанкой вверх
-                    </label>
-                  </div>
-                  {Object.keys(orient).some(id => selected.includes(id)) && <button type="button" style={{ ...chip(false), marginBottom: 4 }} onClick={() => { setOrient({}); setRes(null) }}>Сбросить ручное положение у всех</button>}
-                  {selected.map(id => {
-                    const h = findHit(id)
-                    if (!h) return null
-                    const T = n0(h.mat.thickness) || 16, o = effOf(id), hand = !!orient[id], pl = ownPlace(h.mat.details[h.p.detailIndex], T, o)
-                    return (
-                      <div key={id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
-                        <PartMini p={pl.p} det={pl.det} T={T} corner={pp.stops} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 500 }}>{nm(id)}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{Math.round(n0(pl.p.origX))} × {Math.round(n0(pl.p.origY))} · {o.flip ? 'изнанкой вверх' : 'лицом вверх'} · {hand ? <span style={{ color: 'var(--amber)' }}>вручную</span> : 'по правилам'}</div>
-                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                            <button type="button" style={chip(false)} onClick={() => setOr(id, { rot: ((o.rot || 0) + 1) % 4 })}>⟳ 90°</button>
-                            <button type="button" style={chip(!!o.flip)} onClick={() => setOr(id, { flip: !o.flip })}>⇅ Перевернуть</button>
-                            {hand && <button type="button" style={chip(false)} onClick={() => { setOrient(x => { const n = { ...x }; delete n[id]; return n }); setRes(null) }}>Сброс</button>}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </>
-              )}
-            </div>
-          )
-        })()}
+        {ppOpen && settingsEl(true)}
       </div>
       <button type="button" className="btn-primary" disabled={!ready || !selected.length} onClick={build} style={{ marginTop: 8 }}>
         {ready ? `Создать УП только на ${selected.length === 1 ? 'эту деталь' : 'эти детали'}` : 'Загружаем настройки ЧПУ…'}
@@ -360,22 +406,68 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
       </div>
       <Hint>«Удалить детали» — убрать из заказа (и из карт раскроя; остальные детали остаются на местах, перекроить можно потом). «Удалить присадку» — убрать у отмеченных деталей все отверстия: в пласть и в торец. Пазы, выемки, вырезы и контур остаются.</Hint>
       {done && <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6 }}>✓ {done}</div>}
-      {res && (
-        <div style={{ marginTop: 8 }}>
-          {res.files.map(f => (
-            <div key={f.name} style={{ fontSize: 12.5, padding: '5px 0', borderTop: '0.5px solid var(--border)' }}>
-              <b>{f.label}</b> · деталь {f.size} · заготовка не меньше {f.blank}{f.time ? ` · ≈ ${fmtTime(f.time)}` : ''} <span style={{ color: 'var(--text-hint)' }}>· {f.name}</span>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                {!f.empty && <button type="button" onClick={() => setSim(f)} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', cursor: 'pointer' }}>▶ Симулятор</button>}
-                <button type="button" onClick={() => download(f.name, f.data)} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>⬇ Скачать</button>
-              </div>
-              {f.warnings.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: 'var(--amber)' }}>⚠ {w}</div>)}
+      {!full && resultsEl()}
+      {full && canProg && createPortal((() => {
+        const wide = window.innerWidth >= 900
+        const cur = selected.includes(act) ? act : selected[0]
+        const ci = selected.indexOf(cur), v = cur ? viewOf(cur) : null
+        const go = d => setAct(selected[(ci + d + selected.length) % selected.length])
+        const bigW = wide ? Math.max(320, window.innerWidth - 440 - 60) : window.innerWidth - 40
+        const bigH = wide ? window.innerHeight - 220 : Math.round(window.innerHeight * 0.38)
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100dvh', overscrollBehavior: 'contain' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 12px', borderBottom: '0.5px solid var(--border)' }}>
+              <b style={{ fontSize: 15 }}>Программы на детали · {selected.length}</b>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{pp.place === 'own' ? 'Отступ от упоров' : 'Отступ от нуля'}:</span>
+              <label style={{ fontSize: 12.5 }}>X <input type="text" inputMode="decimal" key={`fx${off.x}`} defaultValue={off.x} onBlur={e => setO({ x: Math.max(0, n0(e.target.value)) })} style={{ ...inp, width: 56 }} /></label>
+              <label style={{ fontSize: 12.5 }}>Y <input type="text" inputMode="decimal" key={`fy${off.y}`} defaultValue={off.y} onBlur={e => setO({ y: Math.max(0, n0(e.target.value)) })} style={{ ...inp, width: 56 }} /></label>
+              <span style={{ flex: 1 }} />
+              <button type="button" className="btn-primary" disabled={!ready || !selected.length} onClick={build} style={{ width: 'auto', padding: '8px 16px', margin: 0 }}>{ready ? 'Создать УП' : 'Загрузка…'}</button>
+              <button type="button" onClick={() => setFull(false)} style={{ padding: '7px 14px', borderRadius: 18, border: '0.5px solid var(--border-md)', background: 'var(--bg2)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>✕ Закрыть</button>
             </div>
-          ))}
-          {res.notes.map((n, i) => <div key={i} style={{ fontSize: 12, color: 'var(--amber)', marginTop: 4 }}>⚠ {n}</div>)}
-          {res.files.length > 0 && <button type="button" className="btn-primary" onClick={() => setSave(true)} style={{ marginTop: 8, background: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить {res.files.length === 1 ? 'программу' : `программы (${res.files.length})`}</button>}
-        </div>
-      )}
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: wide ? 'row' : 'column', overflow: wide ? 'hidden' : 'auto' }}>
+              <div style={{ flex: wide ? 1 : '0 0 auto', minWidth: 0, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                {v ? (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+                      <button type="button" onClick={() => go(-1)} disabled={selected.length < 2} style={{ ...chipS(false), fontSize: 16, padding: '4px 12px' }}>‹</button>
+                      <div style={{ flex: 1, textAlign: 'center' }}>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>{nm(cur)}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{ci + 1} из {selected.length} · {Math.round(n0(v.p.origX))} × {Math.round(n0(v.p.origY))}{v.o ? ` · ${v.o.flip ? 'изнанкой вверх' : 'лицом вверх'} · ${v.hand ? 'вручную' : 'по правилам'}` : ' · как в раскрое'}</div>
+                      </div>
+                      <button type="button" onClick={() => go(1)} disabled={selected.length < 2} style={{ ...chipS(false), fontSize: 16, padding: '4px 12px' }}>›</button>
+                    </div>
+                    <div style={{ flex: wide ? 1 : '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                      <PartMini p={v.p} det={v.det} T={v.T} corner={pp.place === 'own' ? pp.stops : 'bl'} w={bigW} h={bigH} />
+                    </div>
+                    {v.o ? partBtns(cur, v.o, v.hand) : <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Поворот и переворот — в режиме «К упору — свой поворот» (справа)</div>}
+                    <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>● отверстия · ▭ выемки · пазы — синим · синяя точка — {pp.place === 'own' ? 'угол упоров' : 'ноль'}</div>
+                  </>
+                ) : <div style={{ color: 'var(--text-hint)' }}>Нет деталей</div>}
+              </div>
+              <div style={{ width: wide ? 440 : 'auto', flex: wide ? '0 0 440px' : '0 0 auto', borderLeft: wide ? '0.5px solid var(--border)' : 'none', overflowY: wide ? 'auto' : 'visible', padding: '8px 12px' }}>
+                {settingsEl(false)}
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 2px' }}>Детали — нажмите, чтобы посмотреть</div>
+                {selected.map(id => {
+                  const w = viewOf(id)
+                  if (!w) return null
+                  return (
+                    <div key={id} role="button" tabIndex={0} onClick={() => setAct(id)} onKeyDown={e => { if (e.key === 'Enter') setAct(id) }}
+                      style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', cursor: 'pointer', borderRadius: 8, background: id === cur ? 'var(--blue-light)' : 'transparent', borderTop: '0.5px solid var(--border)' }}>
+                      <PartMini p={w.p} det={w.det} T={w.T} corner={pp.place === 'own' ? pp.stops : 'bl'} w={110} h={60} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 500 }}>{nm(id)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{Math.round(n0(w.p.origX))} × {Math.round(n0(w.p.origY))}{w.o ? ` · ${w.hand ? 'вручную' : 'по правилам'}` : ''}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+                {resultsEl()}
+              </div>
+            </div>
+          </div>
+        )
+      })(), document.body)}
       {/* симулятор — поверх всего экрана, как на странице ЧПУ */}
       {sim && createPortal(
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 1100, padding: 10, boxSizing: 'border-box', height: '100dvh', overscrollBehavior: 'contain' }}>

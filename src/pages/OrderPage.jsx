@@ -63,6 +63,7 @@ export default function OrderPage() {
   const [labelMode] = useLabelMode(user)
   const [mapMat, setMapMat] = useState('')        // материал, чьи карты раскроя показаны
   const [partSel, setPartSel] = useState([])       // производство: детали для отдельных управляющих программ (id строк)
+  const [partFull, setPartFull] = useState(0)        // «Выбрать детали с обработкой» — программы деталей во весь экран
   useEffect(() => { fetchOrder() }, [id])
   // сотрудник производства: что ему можно в этом заказе (статусы, ЧПУ, бирки, цены); null — не сотрудник
   const [wperms, setWperms] = useState(null)
@@ -444,7 +445,7 @@ export default function OrderPage() {
             return !!c && ['drillings', 'holes', 'grooves', 'decor', 'edgeGrooves'].some(k => (c[k] || []).length) || (c?.vertices || []).length > 4 }
           const ids = shownDetails.filter(work).map(d => d.id)
           return ids.length > 0 && (
-            <button type="button" onClick={() => setPartSel(ids)}
+            <button type="button" onClick={() => { setPartSel(ids); setPartFull(n => n + 1) }}
               style={{ margin: '0 0 6px', padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>
               ☑ Выбрать детали с обработкой · {ids.length}</button>
           )
@@ -488,7 +489,7 @@ export default function OrderPage() {
             </tbody>
           </table>
         </div>
-        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} canProg={partProg} />}
+        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} canProg={partProg} fullSig={partFull} />}
       </div>
       {isDraft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
