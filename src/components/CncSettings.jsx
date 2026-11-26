@@ -190,6 +190,20 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
   const drill = isDrill6(post), saw = isBeamSaw(post)
   const routers = cnc.posts.filter(isRouterPost)
   const router = routerPost(cnc)
+  // «Тип станка» — переход к станку этого типа: раскроечный — тот, что выпускает G-код; присадочный — выбранный вторым
+  // постпроцессором (или отмеченный для выпуска, или первый); пильный центр — первый. Такого станка нет — тогда
+  // предлагаем сменить тип открытого (как было раньше)
+  const goKind = kind => {
+    if (kind === (post.kind || 'router')) return
+    const sec = secondPost(cnc)
+    const to = kind === 'router' ? router
+      : kind === 'drill6' ? (isDrill6(sec) ? sec : cnc.posts.find(p => isDrill6(p) && (cnc.use6 || []).includes(p.id)) || cnc.posts.find(isDrill6))
+      : cnc.posts.find(isBeamSaw)
+    if (to && to.id !== post.id) { onChange({ ...cnc, post: to.id }); return }
+    const name = kind === 'drill6' ? 'присадочного 6-стор.' : kind === 'beamsaw' ? 'пильного центра' : 'раскроечного'
+    if (!window.confirm(`Другого ${name} станка нет.\nСделать открытый «${post.name}» ${kind === 'drill6' ? 'присадочным 6-стор.' : kind === 'beamsaw' ? 'пильным центром' : 'раскроечным'}?\n\nДобавить новый станок — «Выбрать ▾» сверху.`)) return
+    setKind(kind)
+  }
   const setKind = kind => {
     if (kind === (post.kind || 'router')) return
     if (isRouterPost(post) && routers.length < 2) { window.alert(`Это единственный раскроечный станок. Чтобы добавить другой: «Выбрать ▾» → «+ Присадочный 6-стор.»${cnc.posts.some(isBeamSaw) ? ' или «+ Пильный центр»' : ''}.`); return }
@@ -212,8 +226,8 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Постпроцессор</Title>
         <SaveSnapshotButton cnc={cnc} onChange={onChange} />
-        <label className="label">Тип станка</label>
-        <div style={{ marginBottom: 8 }}><Seg value={post.kind || 'router'} options={KINDS.filter(([k]) => k !== 'beamsaw' || cnc.posts.some(isBeamSaw)).map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'])} onChange={setKind} /></div>
+        <label className="label">Станок — нажмите, чтобы открыть его настройки</label>
+        <div style={{ marginBottom: 8 }}><Seg value={post.kind || 'router'} options={KINDS.filter(([k]) => k !== 'beamsaw' || cnc.posts.some(isBeamSaw)).map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'])} onChange={goKind} /></div>
         <label className="label">Название</label>
         <input type="text" key={post.id} defaultValue={post.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== post.name) set({ name: v }) }} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
