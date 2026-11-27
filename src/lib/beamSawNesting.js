@@ -15,7 +15,7 @@ import { groupLinesOnSheet, posOfInstance } from './partGroups'
 import { narrowSide, narrowTrimTo } from './edgeCut'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.24'   // β0.24: группы фасадов не рвутся «узкой полосой в середину» и добором в дыры; β0.23: packBest (лист за листом — самый плотный из вариантов) + перекройка «хвоста» (repackTail)
+export const BEAM_SAW_VERSION = 'β0.25'   // β0.25: фасад группы, который пила не дорежет (остаток меньше захвата), — с запасом «✂ до …», группа больше не выпадает с листа; β0.24: группы фасадов не рвутся «узкой полосой в середину» и добором в дыры; β0.23: packBest (лист за листом — самый плотный из вариантов) + перекройка «хвоста» (repackTail)
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -91,6 +91,36 @@ function buildUnits(pieces, details) {
     u.detailIndex = unitPieces(u)[0].detailIndex
   }
   return out
+}
+
+// Фасад группы короче соседей в ряду на величину, которую пила не отрежет: остаток меньше захвата (у прижимов не
+// удержать) и не ровно торцовка уровня — раньше из-за этого вся группа не ложилась на лист (785 и 804 в одном ряду:
+// остаток 19 мм). Такой фасад пилится в размер ряда (как узкая деталь — с запасом), на карте «✂ до …» — подрезается
+// потом. lvls — уровни, на которых фасады группы могут дорезаться (по направлениям полос): хоть на одном получается —
+// фасад не трогаем
+function groupAllowance(units, s, kerf, axes) {
+  const grip = s.grip + (s.gripWithKerf ? 0 : kerf)
+  const okAt = (delta, L) => { const r = delta - trimAt(s, L); return r > -1e-6 && (r < EPS || r >= grip - 1e-6) }
+  const fix = (u, top) => {
+    const key = u.stack === 'y' ? 'pw' : 'ph', max = u[key]
+    // уровень дорезки фасадов этого узла: блок вдоль оси 1-го уровня — фасады слотами 1-го уровня, дорезка на 2-м;
+    // поперёк — блок одним слотом, фасады на 2-м уровне, дорезка на 3-м. Подблоки ряда — на уровень глубже
+    const lv = top ? [...new Set(axes.map(ax => (u.stack === ax ? 2 : 3)))] : [3, 4]
+    let changed = false
+    for (const q of u.items) {
+      if (q.items) { changed = fix(q, false) || changed; continue }
+      const delta = max - q[key]
+      if (delta < EPS || lv.some(L => L <= maxLevels(s) && okAt(delta, L))) continue
+      const t0 = q.trimTo || { length: q.origY, width: q.origX }
+      q[key] = max
+      if (key === 'pw') q.origX = max - kerf; else q.origY = max - kerf
+      q.trimTo = t0
+      if (!/✂/.test(q.label)) q.label = q.label.replace(/ ⧉/, ` ✂${Math.round((key === 'pw' ? t0.width : t0.length) * 10) / 10} ⧉`)
+      changed = true
+    }
+    return changed
+  }
+  for (const u of units) if (u.items && fix(u, true)) unitDims(u)
 }
 
 function toPlaced(p, x, y, rot, lvl) {
@@ -945,6 +975,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   // строго вдоль X или Y: заполненные листы режутся как задано, последний перекладывается отдельно (compactLast) —
   // полосами под обрезок вдоль выбранной стороны, детали не поворачиваются. Раньше в этих случаях настройка молча не
   // действовала. Строгое «вдоль X / вдоль Y» в конфигурации раскроя (выбор клиента на странице раскроя) главнее — как было
+  groupAllowance(pieces, s, kerf, axes)   // фасады групп, которые пила не дорежет, — с запасом (см. groupAllowance)
   const lastAxis = s.lastDir !== 'any' && (axes.length > 1 || !cfgDir) ? (s.lastDir === 'x' ? 'y' : 'x') : null
   CMP = { maxFree: !s.stairLast, lastAxis }
   const withLast = o => (lastAxis ? { ...o, lastAxis } : o)
