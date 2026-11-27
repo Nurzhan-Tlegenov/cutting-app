@@ -805,6 +805,11 @@ function PmskSettings({ post, set }) {
         <Num label="Подача врезания F" unit="мм/мин" value={k.plunge} onChange={v => setP({ plunge: v })} hint="пусто — F не пишется" />
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Отскок — куда инструмент уходит от торца перед переездом (−5: не царапает торец).</div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer', fontWeight: 500 }}>
+        <input type="checkbox" checked={k.edge !== false} onChange={e => setP({ edge: e.target.checked })} style={{ width: 18, height: 18 }} />
+        С учётом кромки
+      </label>
+      <Hint>Включено — программа по готовой детали: сначала раскрой, потом кромка, потом присадка в торец. Отверстия отсчитываются от края кромки, глубина — от поверхности кромки (с прифуговкой). Выключите, если торцы сверлят до кромления — тогда по размеру детали из заказа.</Hint>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={k.endX0 !== false} onChange={e => setP({ endX0: e.target.checked })} style={{ width: 18, height: 18 }} />
         В конце программы — в X0 (G00 X0)

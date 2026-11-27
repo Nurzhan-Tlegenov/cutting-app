@@ -23,7 +23,10 @@
  * Плоскость X–Z (торец) — дуги отрезками G01 X Z: так проходит на любой стойке.
  */
 export const isPmsk = post => post?.d6Fmt === 'pmsk'
-export const PMSK_DEFAULT = () => ({ retract: -5, endX0: true, ccw: false, feed: '', plunge: '', seg: 0.5 })
+// edge — «С учётом кромки» (по умолчанию включено): программа по готовой детали — после раскроя деталь кромят, потом
+// сверлят торцы; координаты вдоль торца — от края кромки, длины торцев и глубины — с кромкой. Выключено — по размеру
+// детали из заказа (кто сверлит торцы до кромления)
+export const PMSK_DEFAULT = () => ({ retract: -5, endX0: true, ccw: false, feed: '', plunge: '', seg: 0.5, edge: true })
 /** шпиндели станка: { name, kind: 'drill' | 'mill', d, step — глубина за проход, len — рабочая длина } */
 export const pmskTools = post => {
   const p = post?.pmsk || {}
@@ -54,10 +57,17 @@ export function passes(depth, step) {
  * edge — отверстия в торец из drill6Xml: { face, X, Y, Z (от нижней пласти), depth, dia };
  * cuts — пазы и выемки в торце: { face, p0, p1 (концы на торце, координаты станка), zc — середина по высоте, h — высота
  * (ширина паза), r — скругление углов, depth, pocket }.
+ * off — на сколько готовая деталь (с кромкой) выходит за деталь заказа с каждого края станка, мм:
+ * { x0 — торец 4 (X 0), x1 — торец 3, y0 — торец 2 (Y 0), y1 — торец 1 }; действует при «С учётом кромки»
  * -> { text, warnings, sides: [номера сторон в программе] } ; text = null — обработки торцов нет
  */
-export function pmskNc({ fr, edge, cuts = [] }, post) {
+export function pmskNc({ fr: fr0, edge, cuts = [], off = null }, post) {
   const k = pmskOf(post), warnings = [], warn = w => { if (!warnings.includes(w)) warnings.push(w) }
+  const o = k.edge !== false && off ? { x0: n0(off.x0), x1: n0(off.x1), y0: n0(off.y0), y1: n0(off.y1) } : { x0: 0, x1: 0, y0: 0, y1: 0 }
+  // готовая деталь: торцы длиннее на кромку соседних торцев, точки — от края кромки, глубина — от поверхности кромки
+  const fr = { ...fr0, L: fr0.L + o.x0 + o.x1, Wm: fr0.Wm + o.y0 + o.y1 }
+  const shift = (X, Y) => [n0(X) + o.x0, n0(Y) + o.y0]
+  const faceOff = face => (face === 4 ? o.x0 : face === 3 ? o.x1 : face === 2 ? o.y0 : face === 1 ? o.y1 : 0)
   const drills = k.tools.filter(t => t.kind === 'drill'), mills = k.tools.filter(t => t.kind === 'mill').sort((a, b) => b.d - a.d)
   if (!k.tools.length) warn('у торцевого станка не заданы шпиндели (T1, T2…) — впишите сверла и фрезы в настройках постпроцессора')
   const lenOf = face => (face === 1 || face === 2 ? fr.L : fr.Wm)
@@ -72,7 +82,7 @@ export function pmskNc({ fr, edge, cuts = [] }, post) {
 
   // ── отверстия
   for (const h of edge || []) {
-    const dia = n0(h.dia), depth = n0(h.depth), x = along(h.face, h.X, h.Y), z = n0(h.Z)
+    const dia = n0(h.dia), depth = n0(h.depth) + faceOff(h.face), x = along(h.face, ...shift(h.X, h.Y)), z = n0(h.Z)
     const dr = drills.find(t => Math.abs(t.d - dia) < EPS)
     if (dr) { deep(dr, depth, `отверстие Ø${r1(dia)}`); add(h.face, { tool: dr, x, z, kind: 0, depth, hole: true }); continue }
     const ml = mills.find(t => t.d < dia - EPS)
@@ -83,13 +93,13 @@ export function pmskNc({ fr, edge, cuts = [] }, post) {
   }
   // ── пазы и выемки в торце
   for (const c of cuts || []) {
-    const len = lenOf(c.face), u0 = along(c.face, ...c.p0), u1 = along(c.face, ...c.p1)
-    const ua = Math.min(u0, u1), ub = Math.max(u0, u1), h = n0(c.h), what = `${c.pocket ? 'выемка' : 'паз'} в торце ${r1(ub - ua)} × ${r1(h)} × ${r1(c.depth)}`
+    const len = lenOf(c.face), u0 = along(c.face, ...shift(...c.p0)), u1 = along(c.face, ...shift(...c.p1)), cDepth = n0(c.depth) + faceOff(c.face)
+    const ua = Math.min(u0, u1), ub = Math.max(u0, u1), h = n0(c.h), what = `${c.pocket ? 'выемка' : 'паз'} в торце ${r1(ub - ua)} × ${r1(h)} × ${r1(cDepth)}`
     const ml = mills.find(t => t.d <= h + EPS)
     if (!ml) { warn(`${what} — нет фрезы не шире ${r1(h)} мм — в программу не попал${c.pocket ? 'а' : ''}`); continue }
-    deep(ml, c.depth, what)
+    deep(ml, cDepth, what)
     if (c.r > ml.d / 2 + EPS) warn(`${what}: скругление R${r1(c.r)} больше радиуса фрезы ${ml.name} — углы выйдут R${r1(ml.d / 2)}`)
-    add(c.face, { tool: ml, x: ua, z: c.zc, kind: 2, depth: n0(c.depth), ua, ub, za: c.zc - h / 2, zb: c.zc + h / 2, openA: ua <= EPS, openB: ub >= len - EPS })
+    add(c.face, { tool: ml, x: ua, z: c.zc, kind: 2, depth: cDepth, ua, ub, za: c.zc - h / 2, zb: c.zc + h / 2, openA: ua <= EPS, openB: ub >= len - EPS })
   }
   const sides = [...ops.keys()].sort((a, b) => a - b)
   if (!sides.length) return { text: null, warnings, sides }

@@ -32,7 +32,7 @@
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves'
 import { bandPolygon, bandElements, flatOf, closedOffset } from './pathBand'
-import { rawDetail, parseEdgeTypes, edgeKey, thickFromName } from './edgeCut'
+import { rawDetail, parseEdgeTypes, edgeKey, thickFromName, cutDetail, finishedAdds } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
 import { detailHoles } from './partHoles'
@@ -1138,7 +1138,14 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   // PMSK (торцевая присадка, .nc): только отверстия в торец; xml (SWJ) остаётся для просмотра в приложении
   let pmsk = null
   if (isPmsk(post)) {
-    const r = pmskNc({ fr, edge, cuts: pmCuts }, post)
+    // «С учётом кромки»: на сколько готовая деталь (с кромкой, за вычетом прифуговки) выходит за деталь заказа с каждого
+    // края. Деталь заказа в распиловочных размерах — на толщину кромки; модель с подрезкой (уже готовый размер) — 0
+    let off = null
+    try {
+      const cd = d?._cut ? d : cutDetail(raw, types) || raw, kc = cd?._cut || {}, a = finishedAdds(cd, types)
+      off = { x0: a.left - n0(kc.l), x1: a.right - n0(kc.r), y0: a.bottom - n0(kc.b), y1: a.top - n0(kc.t) }
+    } catch { off = null }
+    const r = pmskNc({ fr, edge, cuts: pmCuts, off }, post)
     // у торцевого станка своё: предупреждения шестистороннего (пласть, фрезы «Обработки») здесь ни к чему
     const own = warnings.filter(w => /торц/i.test(w) && !/инструмент не назначен|фреза .* шире/i.test(w))
     warnings.length = 0
