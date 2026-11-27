@@ -84,11 +84,13 @@ export const LABEL_ITEMS = [
   ['vline', 'Линия │', 'shape', 'shape'],
   ['rect', 'Рамка ▭', 'shape', 'shape'],
   ['table', 'Таблица ⊞', 'shape', 'shape'],
+  // оформление бирки (и детали, и остатка): дата печати — сегодняшняя, в момент печати бирок (не дата заказа)
+  ['printDate', 'Дата печати', 'text', 'deco'],
 ]
 /** Элементы бирки детали (без элементов бирки остатка) */
 export const PART_ITEMS = LABEL_ITEMS.filter(x => !x[3])
 /** Разметка: линии, рамка, таблица */
-export const SHAPE_ITEMS = LABEL_ITEMS.filter(x => x[3] === 'shape')
+export const SHAPE_ITEMS = LABEL_ITEMS.filter(x => x[3] === 'shape' || x[3] === 'deco')
 export const isShape = it => itemKind(it.type) === 'shape'
 /** Элементы бирки делового остатка */
 export const REM_ITEMS = ['remTitle', 'remSize', 'remNo', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
@@ -931,7 +933,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', remNo: 'Остаток №', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', joint: 'Прифуг.', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', joint: 'Прифуг.', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст', printDate: 'Дата:' }
 /** Элементы бирки про пазы — у них есть «С изнанки — в обратных цветах» */
 export const GROOVE_TYPES = ['grooves', 'grooveDims', 'grooveSpan']
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
@@ -952,6 +954,7 @@ function labelValue(type, info, tpl = null) {
     case 'remSize': return info.remSize || ''
     case 'client': return info.client || ''
     case 'date': return info.date || ''
+    case 'printDate': return today()
     case 'title': return [info.des, info.name].filter(Boolean).join(' ')
     case 'name': return info.name
     case 'des': return info.des

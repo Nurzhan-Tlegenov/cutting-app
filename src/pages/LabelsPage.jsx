@@ -802,7 +802,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
         {/* любой параметр можно поставить несколько раз: например, один раз текстом, другой — картинкой в другом месте */}
         {(rem ? REM_ITEMS : [...PART_ITEMS, ...metaItems(mat?.details)]).map(([k, label]) => addChip(k, label))}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Разметка — линии, рамки, таблица</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Оформление — линии, рамки, таблица, дата печати</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {SHAPE_ITEMS.map(([k, label]) => addChip(k, label))}
       </div>
