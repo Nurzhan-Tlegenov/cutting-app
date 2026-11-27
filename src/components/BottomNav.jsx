@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { switchedInfo } from '../lib/accounts'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { unreadCount } from '../lib/messages'
@@ -90,7 +91,7 @@ export default function BottomNav() {
   const [notices, setNotices] = useState({ users: 0, production: 0, orders: 0, posts: 0, list: [] })
   const [toast, setToast] = useState(null)
   const known = useRef(null)                          // события, о которых уже сообщали
-  useEffect(() => { if (user?.id) syncPush() }, [user?.id])   // телефон с включёнными уведомлениями — за вошедшим аккаунтом
+  useEffect(() => { if (user?.id && !switchedInfo(user.id)) syncPush() }, [user?.id])   // в аккаунте клиента представителя — уведомления остаются за самим представителем   // телефон с включёнными уведомлениями — за вошедшим аккаунтом
   useEffect(() => {
     if (!user?.id) return
     let alive = true, hide = null

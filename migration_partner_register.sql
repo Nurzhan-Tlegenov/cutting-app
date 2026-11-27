@@ -31,3 +31,19 @@ end $$;
 revoke all on function public.partner_register_company(text, text, text, text) from public, anon;
 grant execute on function public.partner_register_company(text, text, text, text) to authenticated;
 notify pgrst, 'reload schema';
+
+-- кабинет представителя: телефон клиента — подставляется в «Добавить вход»
+create or replace function public.partner_me() returns json
+language plpgsql security definer set search_path = public stable as $$
+begin
+  if not is_partner() then return null; end if;
+  return (select json_build_object('title', p.title, 'clients', (
+    select coalesce(json_agg(json_build_object('user_id', c.user_id, 'at', c.at, 'name', pr.full_name, 'city', pr.city, 'country', pr.country, 'phone', pr.phone,
+        'production', (select x.name from productions x where x.owner_id = c.user_id limit 1),
+        'production_status', (select x.status from productions x where x.owner_id = c.user_id limit 1),
+        'orders', (select count(*) from orders o where o.user_id = c.user_id or o.production_id in (select id from productions where owner_id = c.user_id)))
+      order by c.at desc), '[]'::json)
+    from partner_clients c left join profiles pr on pr.id = c.user_id where c.partner_id = p.user_id))
+  from partners p where p.user_id = auth.uid());
+end $$;
+notify pgrst, 'reload schema';

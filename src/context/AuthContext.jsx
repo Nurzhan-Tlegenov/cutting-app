@@ -1,4 +1,5 @@
 import { nameOk, phoneOk } from '../lib/profileRules'
+import { accountsState, clearAccounts } from '../lib/accounts'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { forgetPush } from '../lib/push'
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
@@ -199,6 +200,7 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     if (user?.guest) { endGuest(); return }   // выход из пробного режима: заказы гостя остаются на устройстве
+    if (accountsState()?.owner === user?.id) clearAccounts()   // представитель вышел — сохранённые входы в аккаунты клиентов на этом устройстве стираются
     await forgetPush()   // этот телефон больше не получает уведомления этого аккаунта
     // сервер не принял выход (например, «Bad Request») — всё равно выйти на этом устройстве
     const { error } = await supabase.auth.signOut()

@@ -1,4 +1,5 @@
 import PeekBar from './components/PeekBar'
+import AccountSwitchBar from './components/AccountSwitchBar'
 import { GuestBar, GuestRegisterModal, GuestClaimedNote, GuestGate } from './components/GuestUi'
 import { guestPathOk } from './lib/guest'
 import StopGate from './components/AppStop'
@@ -154,6 +155,7 @@ function AppRoutes() {
     <Suspense fallback={<CncLoader full label="Загружаем страницу…" />}>
     <>
     <PeekBar />
+    <AccountSwitchBar />
     <GuestBar />
     <GuestRegisterModal />
     <GuestClaimedNote />
