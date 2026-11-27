@@ -7,7 +7,7 @@ import SupportOrders from '../components/SupportOrders'
 import { isImageFile, payloadBlob, excludeRequest } from '../lib/messages'
 import ExcludeStatsRequest from '../components/ExcludeStatsRequest'
 import { supportTaskFromCard } from '../lib/tasks'
-import { useIsSupport, supportCard, supportFile, supportTake, supportAssign, supportMove, supportReply, supportSummary,
+import { useIsSupport, useSupportRole, supportCard, supportFile, supportTake, supportAssign, supportMove, supportReply, supportSummary,
   supportDevDecide, supportClose, supportReopen, supportMerge, supportTeam, SUPPORT_COLS, SUPPORT_CLOSED, DETAIL_TEMPLATES, DONE_TEXT, supAgo } from '../lib/support'
 
 const dt = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')
@@ -24,6 +24,7 @@ export default function SupportCardPage() {
   const navigate = useNavigate()
   const { user, isMaster } = useAuth()
   const ok = useIsSupport(user?.id)
+  const partner = useSupportRole(user?.id) === 'partner'   // партнёр: свои клиенты; без «Передать…», заказов и пакета поддержки
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -112,17 +113,18 @@ export default function SupportCardPage() {
         <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 4 }}>
           {a.since ? `в приложении с ${new Date(a.since).toLocaleDateString('ru-RU')}` : ''}{a.orders != null ? ` · заказов: ${a.orders}` : ''}
           {c.taken_by ? ` · занимается: ${mine ? 'вы' : c.taken_name}` : ' · никто не взял'}
+          {a.partner && !partner ? ` · 🤝 клиент партнёра ${a.partner}` : ''}
         </div>
       </div>
 
       {/* действия */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {!closed && !mine && btn(c.taken_by ? 'Забрать себе' : '✋ Беру', () => run(() => supportTake(c.id)), {}, 'btn-primary')}
-        {!closed && btn('Передать…', openAssign)}
+        {!closed && !partner && btn('Передать…', openAssign)}
         {!closed && c.status !== 'new' && btn('↩ В «Новые»', () => run(() => supportMove(c.id, 'new')))}
         {!closed && c.status !== 'work' && c.status !== 'new' && btn('В работу', () => run(() => supportMove(c.id, 'work')))}
         {!closed && btn('❓ Нужны подробности', () => setDlg({ kind: 'details', picked: [], text: '' }))}
-        {!closed && c.status !== 'dev' && btn('🛠 Нужен разработчик', () => setDlg({ kind: 'dev', text: '' }))}
+        {!closed && c.status !== 'dev' && btn(partner ? '🛠 Передать разработчику' : '🛠 Нужен разработчик', () => setDlg({ kind: 'dev', text: '' }))}
         {!closed && c.status === 'dev' && isMaster && !c.dev_ok && btn('✓ Берём в разработку', () => setDlg({ kind: 'dev_take', text: '' }), { color: '#7B1FA2', borderColor: '#7B1FA2' })}
         {!closed && c.status === 'dev' && isMaster && btn('✕ Не берём', () => setDlg({ kind: 'dev_reject', text: '' }), { color: 'var(--danger)', borderColor: 'var(--danger)' })}
         {canClose && btn('✓ Сделано — с сообщением', () => setDlg({ kind: 'done', text: DONE_TEXT }), { color: 'var(--teal)', borderColor: 'var(--teal)' })}
@@ -166,11 +168,11 @@ export default function SupportCardPage() {
       </div>
 
       {/* заказы из обращения (просмотр) и пакет для разработчика */}
-      <SupportOrders cardId={c.id} messagesKey={d.messages.length} />
+      {!partner && <SupportOrders cardId={c.id} messagesKey={d.messages.length} />}
 
       {/* внутренние заметки — пользователь их не видит */}
       <div className="card" style={{ marginTop: 14, padding: '9px 10px', background: 'var(--amber-light)', border: 'none' }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>🔒 Заметки поддержки <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--text-muted)' }}>— пользователь их не видит</span></div>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>🔒 {partner ? 'Заметки (вам и разработчику)' : 'Заметки поддержки'} <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--text-muted)' }}>— пользователь их не видит</span></div>
         <SupportNotes cardId={c.id} me={user?.id} isMaster={isMaster} />
       </div>
 

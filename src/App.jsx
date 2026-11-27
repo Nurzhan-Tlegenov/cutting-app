@@ -68,6 +68,7 @@ const ConstructorPage = lazyPage(() => import('./pages/ConstructorPage'))
 const LinearCutPage = lazyPage(() => import('./pages/LinearCutPage'))
 const SupportPage = lazyPage(() => import('./pages/SupportPage'))
 const SupportCardPage = lazyPage(() => import('./pages/SupportCardPage'))
+const PartnerPage = lazyPage(() => import('./pages/PartnerPage'))
 import { startBackupTimer } from './lib/stockBackup'
 const PostAccessPage = lazyPage(() => import('./pages/PostAccessPage'))
 const LoadPage = lazyPage(() => import('./pages/LoadPage'))
@@ -190,6 +191,7 @@ function AppRoutes() {
       <Route path="/load" element={<ProtectedRoute><LoadPage /></ProtectedRoute>} />
       <Route path="/support" element={<ProtectedRoute><SupportPage /></ProtectedRoute>} />
       <Route path="/support/:id" element={<ProtectedRoute><SupportCardPage /></ProtectedRoute>} />
+      <Route path="/partner" element={<ProtectedRoute><PartnerPage /></ProtectedRoute>} />
       <Route path="/stock" element={<ProtectedRoute><StockPage /></ProtectedRoute>} />
       <Route path="/constructor" element={<ProtectedRoute><ConstructorPage /></ProtectedRoute>} />
       <Route path="/linear" element={<ProtectedRoute><LinearCutPage /></ProtectedRoute>} />

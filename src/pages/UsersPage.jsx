@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
 import { adminEmailSignup, adminSetEmailSignup, adminGuestMode, adminSetGuestMode, adminEmailVerifications } from '../lib/adminApi'
+import PartnerToggle, { PartnerBadge } from '../components/PartnerToggle'
 import SupportToggle from '../components/SupportToggle'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone, tgStartLink } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
@@ -343,6 +344,7 @@ export default function UsersPage() {
                       const o = posts.own.get(u.id), based = o.own.filter(x => x.base)
                       return <span title={'Свои постпроцессоры: ' + o.own.map(x => x.name + (x.base ? ` (на основе «${x.base}»)` : '')).join(', ')} style={{ fontSize: 10.5, padding: '1px 5px', borderRadius: 9, background: based.length ? 'var(--amber-light)' : 'var(--bg2)', color: based.length ? 'var(--amber)' : 'var(--text-muted)', flexShrink: 0 }}>⚙</span>
                     })()}
+                    <PartnerBadge userId={u.id} />
                     {posts?.asks.has(u.id) && <span title="Ждёт постпроцессор" style={{ fontSize: 10.5, padding: '1px 5px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>⏳</span>}
                     <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{landOf(u) === '—' ? '—' : `${landOf(u)}${townOf(u) === '—' ? '' : ' · ' + townOf(u)}`}</span>
                     <span style={{ color: 'var(--text-hint)', fontSize: 14, transform: openU.has(u.id) ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
@@ -476,6 +478,7 @@ export default function UsersPage() {
                   {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.users.get(u.id)?.group === 'prod' ? lim.defaultsProd : lim.defaults} isProd={isProd(u) || lim.users.get(u.id)?.group === 'prod'} busy={busy}
                     onSave={(id, unl, l, exp) => act(() => adminSetUserLimits(id, unl, l, exp))} />}
                   {u.id !== user?.id && u.role !== 'admin' && <SupportToggle userId={u.id} name={u.full_name || u.phone || ''} style={{ marginTop: 8 }} />}
+                  {u.id !== user?.id && u.role !== 'admin' && <PartnerToggle userId={u.id} name={u.full_name || u.phone || ''} attach style={{ marginTop: 8 }} />}
                   {u.id !== user?.id && u.role !== 'admin' && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
                       <button type="button" disabled={busy} onClick={() => blockPhone(byPhone(u) ? (u.phone || ('+' + digits(u.email))) : u.email, '', u.full_name || '')} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11, marginRight: 6 }}>{byPhone(u) ? '🚫 Заблокировать номер' : '🚫 Заблокировать почту'}</button>

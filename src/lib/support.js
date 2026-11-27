@@ -14,15 +14,17 @@ async function call(fn, args) {
   } catch (e) { return { error: String(e?.message || e) } }
 }
 
-// ── «я в поддержке?» — один запрос на аккаунт, общий для меню и страниц
+// ── «я в поддержке?» — один запрос на аккаунт, общий для меню и страниц.
+// Роль: 'full' — мастер-аккаунт или сотрудник поддержки; 'partner' — партнёр (видит только обращения своих клиентов,
+// migration_partners.sql); null — нет. Без migration_partners.sql — по-старому, is_support
 let mine = { uid: null, promise: null }
 const subs = new Set()
 function loadMine(uid) {
-  if (mine.uid !== uid || !mine.promise) mine = { uid, promise: uid ? call('is_support').then(r => !!r.data) : Promise.resolve(false) }
+  if (mine.uid !== uid || !mine.promise) mine = { uid, promise: !uid ? Promise.resolve(null)
+    : call('support_role').then(r => (r.missing ? call('is_support').then(x => (x.data ? 'full' : null)) : (r.data || null))) }
   return mine.promise
 }
-/** true — сотрудник поддержки или мастер-аккаунт; undefined — ещё проверяем */
-export function useIsSupport(uid) {
+function useRole(uid) {
   const [on, setOn] = useState(undefined)
   useEffect(() => {
     let alive = true
@@ -33,7 +35,11 @@ export function useIsSupport(uid) {
   }, [uid])
   return on
 }
-const recheckMine = () => { const uid = mine.uid; mine = { uid, promise: null }; loadMine(uid).then(v => subs.forEach(f => f(v))) }
+/** true — сотрудник поддержки, мастер-аккаунт или партнёр (у партнёра — только свои клиенты); undefined — ещё проверяем */
+export function useIsSupport(uid) { const r = useRole(uid); return r === undefined ? undefined : !!r }
+/** 'full' | 'partner' | null; undefined — ещё проверяем */
+export const useSupportRole = useRole
+export const recheckMine = () => { const uid = mine.uid; mine = { uid, promise: null }; loadMine(uid).then(v => subs.forEach(f => f(v))) }
 
 // ── мастер-аккаунт: кто в поддержке (общий список для «Пользователей» и карточки пользователя)
 let staffCache = null
@@ -142,3 +148,15 @@ export const supportConfig = () => callP('support_config')
 export const setSupportStaffPack = on => callP('admin_set_support_pack', { p_on: !!on })
 export const supportCardOrders = cardId => callP('support_card_orders', { p_card: cardId })
 export const supportOrderData = (cardId, orderId, full = false) => callP('support_order_data', { p_card: cardId, p_order: orderId, p_full: !!full })
+
+// ── Партнёры (migration_partners.sql) ──
+export const PARTNER_SQL_HINT = 'Статус «Партнёр» появится после migration_partners.sql в Supabase.'
+const pcall = async (fn, args) => { const r = await call(fn, args); return r.missing ? { ...r, error: PARTNER_SQL_HINT } : r }
+/** мастер: [{ user_id, title, active, added_at, full_name, phone, clients }] */
+export const adminPartners = () => pcall('admin_partners')
+export async function setPartner(userId, on, title = null) { const r = await pcall('admin_set_partner', { p_user: userId, p_on: !!on, p_title: title }); if (!r.error) recheckMine(); return r }
+export const setPartnerClient = (userId, partnerId) => pcall('admin_set_partner_client', { p_user: userId, p_partner: partnerId || null })
+/** мастер: { user_id: имя партнёра } */
+export const adminPartnerMap = () => pcall('admin_partner_map')
+/** партнёр: { title, clients: [{ user_id, at, name, city, country, production, production_status, orders }] } | null */
+export const partnerMe = () => pcall('partner_me')

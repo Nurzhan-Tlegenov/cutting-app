@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAdminDirectory, whoLine } from '../lib/adminDirectory'
 import { WriteToUserDialog } from './WriteToUser'
+import PartnerToggle from './PartnerToggle'
 import SupportToggle from './SupportToggle'
 
 const digits = v => String(v || '').replace(/\D/g, '')
@@ -181,6 +182,7 @@ export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }
             {usage && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 4 }}>За 90 дней выпустил программ: {usage.runs} · последний раз {ago(usage.last)}</div>}
 
             {u.role !== 'admin' && <SupportToggle userId={id} name={u.full_name || name} style={{ marginTop: 12 }} />}
+            {u.role !== 'admin' && <PartnerToggle userId={id} name={u.full_name || name} attach style={{ marginTop: 8 }} />}
             <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
               {canWrite && <button type="button" className="btn-secondary" style={{ flex: 1, minWidth: 130 }} onClick={() => setWrite(true)}>✉ Написать</button>}
               <button type="button" className="btn-primary" style={{ flex: 1, minWidth: 130 }} onClick={openUsers}>В «Пользователях»</button>

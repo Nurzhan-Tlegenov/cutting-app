@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } from '../lib/workplaces'
 import { myProduction } from '../lib/productionApi'
 import { I } from '../lib/navIcons'
-import { useIsSupport } from '../lib/support'
+import { useIsSupport, useSupportRole } from '../lib/support'
 import { hasBeta } from '../lib/beta'
 import { APP_COMMIT, appVersionText, NESTING_VERSION } from '../lib/version'
 import { getUiScale, setUiScale, isTouchDevice, UI_SCALE_MIN, UI_SCALE_MAX } from '../lib/uiScale'
@@ -73,6 +73,7 @@ export function RefreshCorner() {
 export default function NavDrawer({ notices, unread }) {
   const { user, profile, cabinet, setCabinet, isMaster } = useAuth()
   const isSupport = useIsSupport(user?.id)
+  const supRole = useSupportRole(user?.id)
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [open, setOpen] = useState(false)
@@ -279,7 +280,12 @@ export default function NavDrawer({ notices, unread }) {
   ] }
   sections.push(common)
   // поддержка — мастер-аккаунту и сотрудникам поддержки (роль выдаёт мастер); разделов мастера сотрудник не видит
-  if (isMaster || isSupport) sections.push({ id: 'support', icon: I.headset, title: 'Поддержка', sub: isMaster ? '' : 'Вы — сотрудник поддержки', items: [
+  // партнёр RaskroyPro (migration_partners.sql): свои клиенты и их обращения
+  if (supRole === 'partner' && !isMaster) sections.push({ id: 'partner', icon: I.headset, title: 'Партнёр RaskroyPro', sub: 'Внедрение · ваши клиенты', items: [
+    { icon: I.users, label: 'Мои клиенты и приглашения', on: pathname === '/partner', act: () => go('/partner') },
+    { icon: I.inbox, label: 'Обращения клиентов', on: pathname.startsWith('/support'), act: () => go('/support') },
+  ] })
+  else if (isMaster || isSupport) sections.push({ id: 'support', icon: I.headset, title: 'Поддержка', sub: isMaster ? '' : 'Вы — сотрудник поддержки', items: [
     { icon: I.inbox, label: 'Доска обращений', on: pathname.startsWith('/support'), act: () => go('/support') },
   ] })
   if (isMaster) sections.push({ id: 'master', icon: I.crown, title: 'Мастер-аккаунт', badge: (n.users || 0) + (n.posts || 0), items: [

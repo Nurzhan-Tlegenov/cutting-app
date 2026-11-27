@@ -7,7 +7,7 @@ import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { UserName } from '../components/UserCard'
-import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportClose, supportArchiveLegacy, supportNotes, supportConfig, setSupportStaffPack, chatSeenAt, markChatSeen,
+import { useIsSupport, useSupportRole, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportClose, supportArchiveLegacy, supportNotes, supportConfig, setSupportStaffPack, chatSeenAt, markChatSeen,
   SUPPORT_COLS, SUPPORT_CLOSED, supAgo } from '../lib/support'
 
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '')
@@ -24,6 +24,8 @@ export default function SupportPage() {
   const { user, isMaster } = useAuth()
   const navigate = useNavigate()
   const ok = useIsSupport(user?.id)
+  const role = useSupportRole(user?.id)
+  const partner = role === 'partner'   // партнёр: только обращения своих клиентов, без чата / команды / задач поддержки
   const wide = useWide()
   const [cards, setCards] = useState(null)
   const [err, setErr] = useState('')
@@ -52,21 +54,21 @@ export default function SupportPage() {
   }, [ok, load, archive])
   // новые сообщения в чате команды (с прошлого открытия чата)
   useEffect(() => {
-    if (!ok) return
+    if (!ok || partner) return
     if (team === 'chat') return () => markChatSeen()   // ушли из чата — всё, что пришло, пока он был открыт, прочитано
     let alive = true
     const check = () => supportNotes(null).then(r => { if (alive && r.data) { const seen = chatSeenAt(); setChatNew(r.data.filter(n => n.author !== user?.id && (!seen || n.created_at > seen)).length) } })
     const t = setTimeout(check, 0), iv = setInterval(() => { if (!document.hidden) check() }, 30000)
     return () => { alive = false; clearTimeout(t); clearInterval(iv) }
-  }, [ok, team, user?.id])
+  }, [ok, partner, team, user?.id])
   const openView = v => { if (v === 'chat') { markChatSeen(); setChatNew(0) } setTeam(t => (t === v ? '' : v)) }
   const pickCol = c => { setCol(c); try { sessionStorage.setItem('supCol', c) } catch { /* без памяти */ } }
 
-  const head = <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Поддержка</h1>
-    {ok && team && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={() => setTeam('')}>К доске</button>}
-    {ok && team !== 'chat' && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12, marginLeft: 4, position: 'relative' }} onClick={() => openView('chat')}>💬 Чат
+  const head = <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>{partner ? 'Обращения клиентов' : 'Поддержка'}</h1>
+    {ok && !partner && team && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={() => setTeam('')}>К доске</button>}
+    {ok && !partner && team !== 'chat' && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12, marginLeft: 4, position: 'relative' }} onClick={() => openView('chat')}>💬 Чат
       {chatNew > 0 && <span style={{ position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, borderRadius: 9, background: 'var(--danger)', color: '#fff', fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>{chatNew}</span>}</button>}
-    {ok && team !== 'team' && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12, marginLeft: 4 }} onClick={() => openView('team')}>👥 Команда</button>}</div>
+    {ok && !partner && team !== 'team' && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12, marginLeft: 4 }} onClick={() => openView('team')}>👥 Команда</button>}</div>
   if (ok === undefined) return <div className="page"><CncLoader label="Открываем…" /></div>
   if (!ok) return (
     <div className="page" style={{ paddingBottom: 100 }}>{head}
@@ -118,6 +120,7 @@ export default function SupportPage() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>№{c.num}</span>
           <span style={{ fontSize: 13.5, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.author}</span>
+          {c.partner_name && !partner && <span title="Клиент партнёра — обращением занимается партнёр" style={{ fontSize: 10.5, padding: '1px 6px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🤝 {c.partner_name}</span>}
           <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>{supAgo(c.closed_at || c.last_user_at || c.created_at)}</span>
         </div>
         {(c.city || c.country) && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{[c.city, c.country].filter(Boolean).join(', ')}</div>}
@@ -154,12 +157,12 @@ export default function SupportPage() {
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <button type="button" onClick={() => { setArchive(false); setTasks(false) }} className={archive || tasks ? 'btn-secondary' : 'btn-primary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>Обращения</button>
         <button type="button" onClick={() => { setArchive(true); setTasks(false) }} className={archive && !tasks ? 'btn-primary' : 'btn-secondary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>Архив</button>
-        <button type="button" onClick={() => setTasks(true)} className={tasks ? 'btn-primary' : 'btn-secondary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>📌 Задачи</button>
+        {!partner && <button type="button" onClick={() => setTasks(true)} className={tasks ? 'btn-primary' : 'btn-secondary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>📌 Задачи</button>}
         {archive && !tasks && <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск: имя, текст, №" style={{ flex: '1 1 160px', padding: '6px 10px', fontSize: 13 }} />}
         {!archive && !tasks && isMaster && legacy > 0 && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={archiveLegacy}>Старые ({legacy}) → в архив</button>}
       </div>
       {err && <p className="error-text" style={{ fontSize: 12, marginBottom: 8 }}>{err}</p>}
-      {tasks ? <TasksPage team="support" />
+      {tasks && !partner ? <TasksPage team="support" />
         : cards === null ? <CncLoader label="Загружаем обращения…" />
         : archive ? (cards.length ? cards.map(tile) : <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>{q ? 'Ничего не найдено.' : 'В архиве пока пусто.'}</p>)
           : wide ? (
