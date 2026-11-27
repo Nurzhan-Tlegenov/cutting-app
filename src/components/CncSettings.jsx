@@ -208,7 +208,20 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
     if (kind === (post.kind || 'router')) return
     if (isRouterPost(post) && routers.length < 2) { window.alert(`Это единственный раскроечный станок. Чтобы добавить другой: «Выбрать ▾» → «+ Присадочный 6-стор.»${cnc.posts.some(isBeamSaw) ? ' или «+ Пильный центр»' : ''}.`); return }
     if (saw && cnc.posts.filter(isBeamSaw).length < 2) { window.alert('Это единственный пильный центр. Чтобы добавить другой станок: «Выбрать ▾» → «+ Раскроечный станок» или «+ Присадочный 6-стор.».'); return }
-    set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : kind === 'beamsaw' ? { kind, ext: 'xml', nameTpl: '{ZAKAZ}_{MAT}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
+    // расширение и шаблон имени файла прежнего типа запоминаем — вернули тип обратно, они вернутся
+    const was = post.kind || 'router'
+    const kindCfg = { ...(post.kindCfg || {}), [was]: { ext: post.ext, nameTpl: post.nameTpl } }
+    const def = kind === 'drill6' ? { ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : kind === 'beamsaw' ? { ext: 'xml', nameTpl: '{ZAKAZ}_{MAT}' } : { ext: 'nc', nameTpl: NAME_TPL_DEFAULT }
+    const back = kindCfg[kind]
+    set({ kind, kindCfg, ext: back?.ext || def.ext, nameTpl: back?.nameTpl || def.nameTpl })
+  }
+  // сменить тип именно открытого станка (кнопки «Станок» выше переходят к другому станку этого типа, если он есть)
+  const [kindMenu, setKindMenu] = useState(false)
+  const changeOwnKind = kind => {
+    setKindMenu(false)
+    const label = kind === 'drill6' ? 'присадочным 6-стор.' : kind === 'beamsaw' ? 'пильным центром' : 'раскроечным'
+    if (!window.confirm(`Сделать станок «${post.name}» ${label}?\nНастройки станка (инструменты, команды) сохранятся.`)) return
+    setKind(kind)
   }
   const copy = () => { const p = { ...post, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (копия)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }) }
   const del = () => {
@@ -228,6 +241,17 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
         <SaveSnapshotButton cnc={cnc} onChange={onChange} />
         <label className="label">Станок — нажмите, чтобы открыть его настройки</label>
         <div style={{ marginBottom: 8 }}><Seg value={post.kind || 'router'} options={KINDS.filter(([k]) => k !== 'beamsaw' || cnc.posts.some(isBeamSaw)).map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'])} onChange={goKind} /></div>
+        {!foreign && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)', margin: '-2px 0 8px' }}>
+            <span>Тип этого станка: <b>{post.kind === 'drill6' ? 'присадочный 6-стор.' : saw ? 'пильный центр' : 'раскроечный'}</b></span>
+            <button type="button" style={small} onClick={() => setKindMenu(o => !o)}>Сменить тип ▾</button>
+            {kindMenu && KINDS.filter(([k]) => k !== (post.kind || 'router')).map(([k]) => (
+              <button key={k} type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => changeOwnKind(k)}>
+                → {k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'}
+              </button>
+            ))}
+          </div>
+        )}
         <label className="label">Название</label>
         <input type="text" key={post.id} defaultValue={post.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== post.name) set({ name: v }) }} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
