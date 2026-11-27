@@ -27,7 +27,8 @@ import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import Drill6Orient from '../components/Drill6Orient'
 import { cornerShift } from '../lib/sheetCorner'
-import { backOf, backParts, backJob } from '../lib/backSide'
+import { backOf, backParts, backJob, backContour } from '../lib/backSide'
+import { backSide } from '../lib/partInfo'
 import { metaPos, detailMeta } from '../lib/partLabel'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf, skipLabels } from '../lib/gcode'
 import { setLabelBack, setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels, setRemIds } from '../lib/labelMaker'
@@ -130,7 +131,7 @@ export default function CncPage() {
   const mat = useMemo(() => remapMat(mat0, edgeRemap), [mat0, edgeRemap])
   // сохранённый раскрой проверяется ещё раз: пересечение деталей или зазор меньше реза — это брак, G-код по нему не выпускается
   const faults = useMemo(() => (order && mat ? nestingFaults(order, [mat]) : []), [order, mat])
-  const layers = useMemo(() => (mat ? collectLayers(mat.sheets, mat.details, mat.thickness) : null), [mat])
+  const layersFront = useMemo(() => (mat ? collectLayers(mat.sheets, mat.details, mat.thickness) : null), [mat])
   // настройки ЧПУ — общие с окном «Настройки постпроцессора» в кабинете производства; после правки программы создаются заново
   const { cnc, change, ready: cncReady } = useCnc(() => setBuilt(null), order?.production_id || null)
   const post = routerPost(cnc)                       // раскроечный станок: G-код по листам
@@ -143,6 +144,27 @@ export default function CncPage() {
   const saw = sawPost(cnc)
   const r2 = beamMat ? null : r2raw
   const machine = beamMat && saw ? saw : post        // чем выпускаются программы этого раскроя
+  // Слои «Обработки»: с лица — по листам; при доприсадке — ещё и слои обратной стороны. Выемка или паз, которые есть
+  // только с изнанки (например, выемка глубиной 11 под ручку), иначе не попадали в список — инструмент на них не назначить,
+  // и программа доприсадки выходила пустой
+  const backOn = !beamMat && !!backOf(post).on
+  const layers = useMemo(() => {
+    if (!layersFront || !backOn || !mat) return layersFront
+    const T = mat.thickness, o = { ...backOf(post), contour: false }
+    const det = (mat.details || []).map(d => {
+      if (!d || !backSide(d, T)) return null
+      let c
+      try { c = typeof d.contour === 'string' ? JSON.parse(d.contour) : d.contour } catch { c = null }
+      return c ? { ...d, contour: JSON.stringify(backContour(c, T, o)) } : null
+    })
+    if (!det.some(Boolean)) return layersFront
+    const b = collectLayers(mat.sheets.map(sh => ({ ...sh, placed: (sh.placed || []).filter(p => det[p.detailIndex]) })), det, T)
+    const merge = (a, bb) => { const m = new Map(a.map(l => [l.key, { ...l }])); bb.forEach(l => { const cur = m.get(l.key); if (cur) cur.count += l.count; else m.set(l.key, { ...l }) }); return [...m.values()] }
+    return { ...layersFront,
+      holes: merge(layersFront.holes, b.holes).sort((x, y) => x.d - y.d || x.depth - y.depth),
+      pockets: merge(layersFront.pockets, b.pockets).sort((x, y) => x.depth - y.depth),
+      grooveLayers: merge(layersFront.grooveLayers, b.grooveLayers).sort((x, y) => x.width - y.width || x.depth - y.depth) }
+  }, [layersFront, backOn, mat, post])   // eslint-disable-line react-hooks/exhaustive-deps
   setLabelBack(beamMat ? null : post)                // уголок доприсадки на бирках двусторонних деталей
   const r2view = useMemo(() => (r2 ? postView({ ...cnc, post: r2.id }) : null), [cnc, r2?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
