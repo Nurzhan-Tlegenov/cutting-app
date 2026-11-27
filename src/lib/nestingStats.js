@@ -36,6 +36,11 @@ function edgeGrooveList(d) {
   return (c?.edgeGrooves || []).filter(g => (g.kind || 'groove') === 'groove')
 }
 const THICK_FROM = 1          // кромка толще 1 мм считается «толстой» (обычно 2 мм), до 1 мм — «тонкой» (0,4–1 мм)
+// Цены по толщине (прайс-лист): плита — до 16, 17–21 (18), 22–29, 30 и толще; кромка — до 0,5, 0,5–1,5, толще 1,5;
+// отверстие в пласть — Ø до 10, 11–32, 33–40, больше 40
+export const plateClass = T => (T < 17 ? '16' : T < 22 ? '18' : T < 30 ? '22' : '30')
+export const edgeClass = t => (t <= 0.5 ? 'a' : t <= 1.5 ? 'b' : 'c')
+export const holeClass = d => (d <= 10 ? 'a' : d <= 32 ? 'b' : d <= 40 ? 'c' : 'd')
 
 export const emptyStats = () => ({
   sheets: [], sheetCount: 0, offcutSheets: 0, parts: 0, kerf: 0, method: 'nesting',
@@ -53,6 +58,10 @@ export const emptyStats = () => ({
   edgeWideM: 0, edgeWideParts: 0, edgeWideThinM: 0, edgeWideThickM: 0,   // широкая кромка — вся прямая кромка склеенных деталей;
                                // она же входит в edgeThinM / edgeThickM (по толщине), а в смете отдельно — если у неё есть своя цена
   hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
+  holesD: { a: 0, b: 0, c: 0, d: 0 },   // отверстия в пласть по диаметру (holeClass) — для цен по диаметру
+  // прямая кромка по толщине плиты и кромки: { '18_b': [м до 1 мм, м толще 1 мм] } (для цены «по толщине»; до/толще 1 мм —
+  // чтобы пустая клетка шла по прежней цене); edgeMxG — то же у склеенных деталей (плита — двойной толщины)
+  edgeMx: {}, edgeMxG: {},
 })
 
 /**
@@ -74,7 +83,7 @@ export function nestingStats({ order, mat, method }) {
     if (!sh?.placed?.length) continue
     const geo = sheetGeo(order, mat.result, sh)
     st.kerf = geo.kerf || st.kerf
-    const row = { parts: sh.placed.length, cutM: 0, cuts: 0, perimM: 0, offcut: sh.stock === 'offcut', usedPct: 0 }
+    const row = { parts: sh.placed.length, cutM: 0, cuts: 0, perimM: 0, offcut: sh.stock === 'offcut', usedPct: 0, t: plateClass(T) }
     let used = 0, contourM = 0, contours = 0
     for (const p of sh.placed) {
       const d = details[p.detailIndex]
@@ -86,6 +95,7 @@ export function nestingStats({ order, mat, method }) {
       if (Array.isArray(p.polygon) && p.polygon.length > 2 && !(f.outline.length === 4 && Math.abs(loopArea(f.outline) - p.origX * p.origY) < 1)) st.shapedParts++
       const bf = backFeatures(p, d, T)
       st.holes += f.holes.length + bf.holes.length; st.holesBack += bf.holes.length; st.edgeHoles += f.skipped.edge
+      for (const h of [...f.holes, ...bf.holes]) st.holesD[holeClass(Number(h.d) || 0)]++
       if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
       st.pockets += f.pockets.length + bf.pockets.length; st.pocketsBack += bf.pockets.length
       // пазы — с обеих пластей: с изнанки (в т.ч. «Пазы — всегда снизу» при импорте) partFeatures не отдаёт
@@ -121,6 +131,8 @@ export function nestingStats({ order, mat, method }) {
           const thick = thickOf(e.name) > THICK_FROM
           if (thick) st.edgeThickM += m
           else st.edgeThinM += m
+          { const mx = gr ? st.edgeMxG : st.edgeMx, key = `${plateClass(gr ? 2 * T : T)}_${edgeClass(thickOf(e.name))}`
+            const c = mx[key] || (mx[key] = [0, 0]); c[thick ? 1 : 0] += m }
           // кромка на склеенной детали — широкая
           if (gr) { wide = true; st.edgeWideM += m; if (thick) st.edgeWideThickM += m; else st.edgeWideThinM += m }
         }
@@ -168,6 +180,8 @@ export function sumStats(list) {
       else if (k === 'kerf') t.kerf = t.kerf || s.kerf
       else if (k === 'method') t.method = s.method || t.method
       else if (k === 'hdf') t.hdf = t.hdf || !!s.hdf
+      else if (k === 'holesD') for (const [n, v] of Object.entries(s.holesD || {})) t.holesD[n] = (t.holesD[n] || 0) + v
+      else if (k === 'edgeMx' || k === 'edgeMxG') for (const [n, v] of Object.entries(s[k] || {})) { const c = t[k][n] || (t[k][n] = [0, 0]); c[0] += v[0]; c[1] += v[1] }
       else t[k] += s[k] || 0
     }
   }
@@ -178,7 +192,14 @@ export function sumStats(list) {
 // order — чтобы передать тип изделия для цены присадки за м² (orders.drill_kind: 'large' — шкафы, крупные детали)
 export function statsPayload(st, order = null) {
   return {
-    sheets: st.sheets.map(s => ({ parts: s.parts })),
+    // t — класс толщины плиты листа (раскрой и разгрузка по толщине), o — обрезок со склада (разгрузка не считается)
+    sheets: st.sheets.map(s => ({ parts: s.parts, ...(s.t ? { t: s.t } : {}), ...(s.offcut ? { o: 1 } : {}) })),
+    parts_m2: r2(st.partsM2),
+    ...(Object.values(st.holesD || {}).some(Boolean) ? { hd: st.holesD } : {}),
+    ...(Object.keys(st.edgeMx || {}).length ? { em: Object.fromEntries(Object.entries(st.edgeMx).map(([k, v]) => [k, [r2(v[0]), r2(v[1])]])) } : {}),
+    ...(Object.keys(st.edgeMxG || {}).length ? { emg: Object.fromEntries(Object.entries(st.edgeMxG).map(([k, v]) => [k, [r2(v[0]), r2(v[1])]])) } : {}),
+    // заказчик заказа — для розничного коэффициента, когда смету смотрит само производство (база доверяет ему только у владельца)
+    ...(order?.user_id ? { client: order.user_id } : {}),
     parts: st.parts, cut_m: r2(st.cutM), upil_n: st.upils, upil_m: r2(st.upilM),
     // склейка и широкая кромка (migration_glue.sql): широкая кромка входит и в edge_thin_m / edge_thick_m —
     // база вычитает её оттуда, только если у широкой кромки есть своя цена (иначе — как раньше, по цене обычной)

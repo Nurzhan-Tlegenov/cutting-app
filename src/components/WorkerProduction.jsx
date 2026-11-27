@@ -1,3 +1,4 @@
+import PostEarnings from './PostEarnings'
 import { useEffect, useState } from 'react'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -180,7 +181,8 @@ export default function WorkerProduction({ wps }) {
           </div>
         </div>
       ))}
-
+      {/* свой заработок по расценкам постов (сдельно) — видит каждый сотрудник */}
+      <PostEarnings prodId={wp.production_id} title="Мой заработок" mine />
       </>}
       {view === 'board' && <ProductionBoard prodId={wp.production_id} onChange={load} />}
       {view === 'stats' && <StaffStats prodId={wp.production_id} canOpen={chief} money={!!perms.prices} />}

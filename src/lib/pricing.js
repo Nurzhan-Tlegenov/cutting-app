@@ -49,12 +49,32 @@ export const HDF_ITEMS = [
   ['hdf_cut_sheet', 'Раскрой листа', 'за лист', 'cut_sheet'],
   ['hdf_cut_part', 'Деталь', 'за деталь', 'cut_part'],
 ]
-export const GROUP_TITLE = Object.fromEntries(PRICE_GROUPS.map(g => [g.id, g.title]))
+// Цены по толщине плиты (раскрой листа, кромка, разгрузка) и по диаметру отверстия (migration_price_thickness.sql)
+export const PLATE_CLASSES = [['16', 'до 16 мм'], ['18', '17–21 мм'], ['22', '22–29 мм'], ['30', '30 мм и толще']]
+export const EDGE_CLASSES = [['a', 'до 0,5'], ['b', '0,5–1,5'], ['c', 'толще 1,5']]
+export const HOLE_CLASSES = [['a', 'Ø до 10'], ['b', 'Ø 11–32'], ['c', 'Ø 33–40'], ['d', 'Ø больше 40']]
+const PL = Object.fromEntries(PLATE_CLASSES), EL = Object.fromEntries(EDGE_CLASSES)
+export const GROUP_TITLE = { ...Object.fromEntries(PRICE_GROUPS.map(g => [g.id, g.title])), other: 'Прочее' }
 const LINE_TITLE = { ...Object.fromEntries(PRICE_GROUPS.flatMap(g => g.items.map(([k, t]) => [k, t]))), cut_tiers: 'Раскрой листа (по числу деталей)',
   hdf_cut_m: 'Рез ХДФ', hdf_cut_sheet: 'Раскрой листа ХДФ', hdf_cut_tiers: 'Раскрой листа ХДФ (по числу деталей)', hdf_cut_part: 'Деталь ХДФ' }
 const LINE_UNIT = { cut_m: 'м', cut_sheet: 'л.', cut_tiers: 'л.', cut_part: 'дет.', upil: 'шт.', upil_m: 'м', shaped_part: 'дет.', cutout: 'шт.', edge_m: 'м', edge_thick_m: 'м', edge_curved_m: 'м', edge_curved_part: 'дет.', hole: 'шт.', edge_hole: 'шт.', drill_m2: 'м²', drill_m2_large: 'м²', groove_m: 'м', groove_narrow: 'шт.', groove_wide: 'шт.', pocket: 'шт.', label: 'дет.', glue_m2: 'м²', glue_part: 'дет.', edge_wide_m: 'м', edge_wide_part: 'дет.', hdf_cut_m: 'м', hdf_cut_sheet: 'л.', hdf_cut_tiers: 'л.', hdf_cut_part: 'дет.' }
-export const lineTitle = key => LINE_TITLE[key] || key
-export const lineUnit = key => LINE_UNIT[key] || ''
+export const lineTitle = key => {
+  if (LINE_TITLE[key]) return LINE_TITLE[key]
+  let m = /^cut_sheet_(\d+)$/.exec(key); if (m) return `Раскрой листа ${PL[m[1]] || m[1]}`
+  m = /^unload_(\d+)$/.exec(key); if (m) return `Разгрузка, лист ${PL[m[1]] || m[1]}`
+  m = /^edge_(\d+)_([abc])$/.exec(key); if (m) return `Кромка ${EL[m[2]]} мм · плита ${PL[m[1]] || m[1]}`
+  m = /^hole_([abcd])$/.exec(key); if (m) return `Отверстие в пласть ${Object.fromEntries(HOLE_CLASSES)[m[1]]}`
+  return key
+}
+export const lineUnit = key => LINE_UNIT[key] || (/^(cut_sheet|unload)_/.test(key) ? 'л.' : /^edge_\d+_/.test(key) ? 'м' : /^hole_/.test(key) ? 'шт.' : '')
+/** Клиенты производства — для категорий «розница» / «постоянный» (migration_price_thickness.sql) -> { data } | { error } */
+export async function productionClients(productionId) {
+  try {
+    const { data, error } = await supabase.rpc('production_client_list', { p_prod: productionId })
+    if (error) return { error: isMissing(error) ? 'Список клиентов появится после migration_price_thickness.sql в Supabase.' : error.message }
+    return { data: data || [] }
+  } catch (e) { return { error: String(e?.message || e) } }
+}
 
 export const money = (v, cur) => `${(Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}${cur ? ' ' + cur : ''}`
 

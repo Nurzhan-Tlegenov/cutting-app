@@ -1,3 +1,4 @@
+import PostEarnings from '../components/PostEarnings'
 import { ALLOW_MODES } from '../lib/edgeCut'
 import Hint from '../components/Hint'
 import { MenuButton, Ico } from '../components/NavDrawer'
@@ -483,6 +484,8 @@ export default function ProductionPage() {
                       {statsHint && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6 }}>{statsHint}</p>}
                     </>
                   )}
+                  {/* сдельная оплата постов: кто сколько заработал */}
+                  {prod?.id && <PostEarnings prodId={prod.id} />}
                 </div>
           </div>
           <LimitsBar cabinet="production" refresh={orders.map(o => o.status).join() + archived.size} />

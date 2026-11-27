@@ -106,7 +106,7 @@ export default function NestingCost({ order, mats, method, productionId, full = 
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, paddingTop: 5, marginTop: 3, borderTop: '1px solid var(--border-md)' }}>
-            <span style={{ fontWeight: 500 }}>Итого{quote.min_applied ? ' (минимальная сумма заказа)' : ''}</span>
+            <span style={{ fontWeight: 500 }}>Итого{quote.min_applied ? ' (минимальная сумма заказа)' : ''}{quote.retail_k ? <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--text-hint)' }}> · розница ×{String(quote.retail_k).replace('.', ',')}</span> : null}</span>
             <b style={{ fontSize: 16 }}>{money(quote.total, quote.currency)}</b>
           </div>
         </>

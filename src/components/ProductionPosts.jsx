@@ -4,6 +4,7 @@ import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
 import StageReturn from './StageReturn'
+import { PAY_UNITS } from '../lib/postPay'
 import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf, skipKindOf } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, stageUnaccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
@@ -236,6 +237,30 @@ function PostLinkBox({ post }) {
   )
 }
 
+// Расценка поста (сдельная оплата): единица и цена; начисляется тому, кто выполнил пост (PostEarnings)
+function PayEditor({ pay, busy, onSave }) {
+  const unit = pay?.unit || 'sheet'
+  // своё значение поля — пока его правят; ушло на сохранение — снова то, что в настройке поста
+  const [edit, setEdit] = useState(null)
+  const rate = edit ?? pay?.rate ?? ''
+  const setRate = v => setEdit(v)
+  const save = (patch) => onSave({ unit, rate: String(rate).replace(/[^0-9.,]/g, ''), ...patch })
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Расценка (сдельно) — начисляется тому, кто выполнил пост:</div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input type="text" inputMode="decimal" placeholder="нет" value={rate} disabled={busy}
+          onChange={e => setRate(e.target.value.replace(/[^0-9.,]/g, ''))} onBlur={() => { if (String(rate) !== String(pay?.rate ?? '')) save({}); setEdit(null) }}
+          style={{ width: 90, flex: '0 0 auto', padding: '6px 8px', fontSize: 14, textAlign: 'right' }} />
+        <select value={unit} disabled={busy} onChange={e => save({ unit: e.target.value })} style={{ flex: 1, minWidth: 0, width: 'auto', padding: '6px 8px', fontSize: 13 }}>
+          {PAY_UNITS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Пусто — пост не оплачивается. Начисления — в «Итогах» → «Заработок постов», с момента, когда задана расценка.</div>
+    </div>
+  )
+}
+
 const SKIP_OPTS = [['edge', 'если в заказе нет кромки'], ['drill', 'если в заказе нет присадки'], ['off', 'не пропускать']]
 
 /** Какие детали идут через пост: все, с кромкой, с присадкой (что учитывать), без списка */
@@ -257,6 +282,7 @@ function RuleEditor({ post, busy, onSave }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {SKIP_OPTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(skip === k)} onClick={() => set({ skipIf: k })}>{skip === k ? '✓ ' : ''}{l}</button>)}
       </div>
+      <PayEditor pay={post.rule?.pay} busy={busy} onSave={pay => set({ pay })} />
       {r.list === 'edge' && (
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!r.sides} disabled={busy} onChange={e => set({ sides: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />

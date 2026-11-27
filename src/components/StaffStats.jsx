@@ -7,6 +7,7 @@ import { Results, usePeriod } from './OrderStats'
 import { productionStatsOf } from '../lib/productionApi'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import CncLoader from './CncLoader'
+import PostEarnings from './PostEarnings'
 
 export default function StaffStats({ prodId, canOpen = false, money = false }) {
   const { user } = useAuth()
@@ -31,6 +32,7 @@ export default function StaffStats({ prodId, canOpen = false, money = false }) {
           <Results list={list} per={per} show={show} onShow={v => { setShow(v); saveUserSettings({ resultsShow: v }, user) }}
             onOpen={canOpen ? o => navigate(`/orders/${o.id}`) : undefined} />
           {!money && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 6 }}>Суммы не показываются — нет права «Цены».</p>}
+          {money && <PostEarnings prodId={prodId} />}
         </>
       )}
     </div>

@@ -18,7 +18,7 @@ import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeom
 import { parsePolygonFromDetail } from './trueShapeNesting'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { edgeThick, parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims, finishedAdds } from './edgeCut'
+import { edgeKey, edgeThick, parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims, finishedAdds } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -53,6 +53,7 @@ export const LABEL_ITEMS = [
   ['cutouts', 'Вырезы', 'text'],
   ['twoSided', 'Обработка с двух сторон', 'text'],
   ['edgeList', 'Кромка — списком', 'text'],
+  ['joint', 'Прифуговка (число)', 'text'],
   ['allow', 'Припуск (из модели)', 'text'],
   ['glue', 'Склейка', 'text'],
   ['narrow', 'Узкая деталь — упилить после кромки', 'text'],
@@ -670,6 +671,8 @@ export function labelInfo(order, mat, si, pi, part = null) {
     edgeAdd: finishedAdds(d, typesD),
     faceHoles: face, backHoles: back, endHoles: end, grooves, grooveDims, backGroove: grooveDims.some(g => g.back), pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
+    // прифуговка кромок детали (вид кромки → «прифуговка, мм»): одно число, разные — через « / »
+    joint: [...new Set([rawD.edge_left, rawD.edge_right, rawD.edge_top, rawD.edge_bottom].map(e => { const k = edgeKey(e); return k ? Number(String(typesD?.[k]?.joint ?? '').replace(',', '.')) || 0 : 0 }).filter(v => v > 0))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
     sidesT, sidesTCw: { top: sidesT.left, bottom: sidesT.right, left: sidesT.bottom, right: sidesT.top },
     grooveSide, grooveSideCw: grooveSide ? { left: 'top', right: 'bottom', bottom: 'left', top: 'right' }[grooveSide] : null,
@@ -928,7 +931,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', remNo: 'Остаток №', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', joint: 'Прифуг.', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 /** Элементы бирки про пазы — у них есть «С изнанки — в обратных цветах» */
 export const GROOVE_TYPES = ['grooves', 'grooveDims', 'grooveSpan']
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
@@ -997,6 +1000,7 @@ function labelValue(type, info, tpl = null) {
     case 'cutouts': return info.cutouts ? String(info.cutouts) : ''
     case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
     case 'edgeList': return info.edgeList.length ? info.edgeList.join(', ') : ''
+    case 'joint': return info.joint?.length ? info.joint.map(v => String(Math.round(v * 100) / 100).replace('.', ',')).join(' / ') : ''
     // припуск из модели — по сторонам бирки (как кромка): «80 слева», «80 слева, 5 снизу»
     case 'allow': {
       const a = (tpl ? tpl.rot !== false : true) ? info.allowCw : info.allow

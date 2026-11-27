@@ -1,6 +1,6 @@
 import Hint from './Hint'
 import { useEffect, useState } from 'react'
-import { loadPrices, savePrices, PRICE_GROUPS, HDF_ITEMS } from '../lib/pricing'
+import { loadPrices, savePrices, PRICE_GROUPS, HDF_ITEMS, PLATE_CLASSES, EDGE_CLASSES, HOLE_CLASSES, productionClients } from '../lib/pricing'
 import { useBackClose } from '../lib/backStack'
 
 // Прайс-лист производства: цены на операции, с которыми сталкивается раскрой.
@@ -54,6 +54,28 @@ export default function PriceList({ production, onClose }) {
                   </div>
     )
   }
+  // цены по классам (толщина плиты, диаметр): строка «название — поле»; пустое поле — серым цена по умолчанию
+  const filled = keys => keys.some(k => String(data?.[k] ?? '') !== '')
+  const classList = (prefix, list, base, hint) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 8px', alignItems: 'center', marginTop: 4 }}>
+      {list.map(([c, l]) => (
+        <div key={c} style={{ display: 'contents' }}>
+          <span style={{ fontSize: 13 }}>{l}</span>
+          <input type="text" inputMode="decimal" placeholder={base && data[base] ? String(data[base]) : '—'} value={data[prefix + c] ?? ''}
+            onChange={e => set(prefix + c, clean(e.target.value))} style={{ ...inp, width: 96 }} />
+        </div>
+      ))}
+      {hint && <div style={{ gridColumn: '1 / -1' }}><Hint>{hint}</Hint></div>}
+    </div>
+  )
+  const section = (title, keys, body) => (
+    <details open={filled(keys)} style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+      <summary style={{ fontSize: 13, cursor: 'pointer' }}>{title}{filled(keys) ? ' ✓' : ''}</summary>
+      {body}
+    </details>
+  )
+  const plateKeys = p => PLATE_CLASSES.map(([c]) => p + c)
+  const edgeKeys = PLATE_CLASSES.flatMap(([pc]) => EDGE_CLASSES.map(([ec]) => `edge_${pc}_${ec}`))
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
@@ -100,6 +122,28 @@ export default function PriceList({ production, onClose }) {
                   </div>
                 ))}
                 {g.id === 'cut' && tiersEditor('tiers', 'Раскрой листа по числу деталей на листе')}
+                {g.id === 'cut' && section('Раскрой листа по толщине плиты', plateKeys('cut_sheet_'), classList('cut_sheet_', PLATE_CLASSES, 'cut_sheet',
+                  'Цена за лист своей толщины. Пустое поле — лист этой толщины считается как раньше (по ступеням или общей цене за лист). На ХДФ не действует.'))}
+                {g.id === 'edge' && section('Кромка по толщине плиты и кромки', edgeKeys, (
+                  <div style={{ marginTop: 4 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `minmax(0, 1fr) repeat(${EDGE_CLASSES.length}, 72px)`, gap: 4, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>плита \ кромка, мм</span>
+                      {EDGE_CLASSES.map(([ec, l]) => <span key={ec} style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>{l}</span>)}
+                      {PLATE_CLASSES.map(([pc, pl]) => (
+                        <div key={pc} style={{ display: 'contents' }}>
+                          <span style={{ fontSize: 12.5 }}>{pl}</span>
+                          {EDGE_CLASSES.map(([ec]) => (
+                            <input key={ec} type="text" inputMode="decimal" placeholder={String((ec === 'a' ? data.edge_m : data.edge_thick_m || data.edge_m) || '—')}
+                              value={data[`edge_${pc}_${ec}`] ?? ''} onChange={e => set(`edge_${pc}_${ec}`, clean(e.target.value))} style={{ ...inp, width: '100%', padding: '6px 5px', fontSize: 13 }} />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    <Hint>Цена за метр прямой кромки по толщине плиты (строки) и кромки (столбцы). Пустая клетка — как раньше: «Кромка прямая до 1 мм» / «толще 1 мм». Склеенная деталь (2 × 16) считается как плита 30 мм и толще, если у широкой кромки нет своей цены.</Hint>
+                  </div>
+                ))}
+                {g.id === 'drill' && section('Отверстие в пласть по диаметру', HOLE_CLASSES.map(([c]) => 'hole_' + c), classList('hole_', HOLE_CLASSES, 'hole',
+                  'Цена за отверстие своего диаметра. Пустое поле — по цене «Отверстие в пласть».'))}
               </div>
             ))}
             {/* ХДФ / ДВП — тонкий материал задних стенок, режется на пиле: распил по своим ценам */}
@@ -117,6 +161,12 @@ export default function PriceList({ production, onClose }) {
               ))}
               {tiersEditor('hdf_tiers', 'Раскрой листа ХДФ по числу деталей на листе')}
             </div>
+            <div className="card" style={{ marginBottom: 10 }}>
+              <p className="section-title">Разгрузка</p>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>За каждый лист заказа, цена — по толщине листа. Пустое поле — разгрузка листов этой толщины не считается. Обрезки со склада не считаются.</div>
+              {classList('unload_', PLATE_CLASSES, null)}
+            </div>
+            <RetailCard production={production} data={data} set={set} inp={inp} />
             <Hint>Все заполненные цены складываются: например, «за метр реза» и «за лист» вместе. Стоимость материала и самой кромки в расчёт не входит — только работа.</Hint>
           </>
         )}
@@ -126,6 +176,59 @@ export default function PriceList({ production, onClose }) {
         {saved && <p style={{ fontSize: 12, color: 'var(--teal)', marginBottom: 6, textAlign: 'center' }}>Сохранено</p>}
         <button type="button" className="btn-primary" disabled={busy || !data} onClick={save}>{busy ? 'Сохраняем…' : 'Сохранить прайс-лист'}</button>
       </div>
+    </div>
+  )
+}
+
+// Категории клиентов: розница — цена с повышающим коэффициентом (по умолчанию все клиенты), постоянные — базовая цена.
+// Своё производство (заказы, оформленные владельцем) — всегда по базовой цене
+function RetailCard({ production, data, set, inp }) {
+  const [list, setList] = useState(null)
+  const [err, setErr] = useState('')
+  const [q, setQ] = useState('')
+  const regular = Array.isArray(data.regular) ? data.regular : []
+  const k = Number(String(data.retail_k ?? '').replace(',', '.')) || 0
+  useEffect(() => {
+    let alive = true
+    productionClients(production.id).then(r => { if (!alive) return; if (r.error) setErr(r.error); setList(r.data || []) })
+    return () => { alive = false }
+  }, [production.id])
+  const toggle = id => set('regular', regular.includes(id) ? regular.filter(x => x !== id) : [...regular, id])
+  const shown = (list || []).filter(c => !q || `${c.name || ''} ${c.phone || ''}`.toLowerCase().includes(q.toLowerCase()))
+  return (
+    <div className="card" style={{ marginBottom: 10 }}>
+      <p className="section-title">Категории клиентов</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13 }}>Розница — коэффициент к цене</div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>например 1,2 — на 20 % дороже; пусто или 1 — у всех одна цена</div>
+        </div>
+        <input type="text" inputMode="decimal" placeholder="1" value={data.retail_k ?? ''} onChange={e => set('retail_k', String(e.target.value).replace(/[^0-9.,]/g, ''))} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
+      </div>
+      <Hint>Все клиенты сначала — розница. Постоянных отметьте ниже: им — базовая цена прайс-листа. Клиент видит только итоговую сумму, коэффициент ему не показывается. Ваши собственные заказы — всегда по базовой цене. Уже оформленные заказы не пересчитываются.</Hint>
+      {err ? <p style={{ fontSize: 12, color: 'var(--amber)', marginTop: 6 }}>{err}</p> : list === null ? <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>Загрузка клиентов…</p> : !list.length ? (
+        <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>Клиентов пока нет — появятся, когда оформят заказы на ваше производство.</p>
+      ) : (
+        <div style={{ marginTop: 6 }}>
+          {list.length > 8 && <input type="text" placeholder="Поиск по имени или телефону" value={q} onChange={e => setQ(e.target.value)} style={{ padding: '6px 8px', fontSize: 13, marginBottom: 6 }} />}
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 2 }}>Клиенты · постоянных {regular.filter(id => list.some(c => c.id === id)).length} из {list.length}</div>
+          <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+            {shown.map(c => {
+              const reg = regular.includes(c.id)
+              return (
+                <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={reg} onChange={() => toggle(c.id)} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name || 'без имени'}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{c.phone || ''}{c.phone ? ' · ' : ''}заказов {c.orders}</span>
+                  </span>
+                  <span style={{ fontSize: 11, color: reg ? 'var(--teal)' : 'var(--text-hint)', whiteSpace: 'nowrap' }}>{reg ? 'постоянный' : k > 0 && k !== 1 ? `розница ×${String(k).replace('.', ',')}` : 'розница'}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
