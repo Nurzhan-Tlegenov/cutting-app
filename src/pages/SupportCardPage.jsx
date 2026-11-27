@@ -113,7 +113,7 @@ export default function SupportCardPage() {
         <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 4 }}>
           {a.since ? `в приложении с ${new Date(a.since).toLocaleDateString('ru-RU')}` : ''}{a.orders != null ? ` · заказов: ${a.orders}` : ''}
           {c.taken_by ? ` · занимается: ${mine ? 'вы' : c.taken_name}` : ' · никто не взял'}
-          {a.partner && !partner ? ` · 🤝 клиент партнёра ${a.partner}` : ''}
+          {a.partner && !partner ? ` · 🤝 клиент официального представителя ${a.partner}` : ''}
         </div>
       </div>
 

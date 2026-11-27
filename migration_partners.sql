@@ -249,7 +249,7 @@ begin
   select * into c from support_cards where id = p_id for update;
   if not found then raise exception 'no card'; end if;
   insert into app_messages (from_id, from_name, to_id, kind, body)
-    values (auth.uid(), case when is_support() then 'Поддержка RaskroyPro · ' else 'Партнёр RaskroyPro · ' end || support_name(auth.uid()) || ' → ' || support_name(c.user_id), c.user_id, 'reply', b);
+    values (auth.uid(), case when is_support() then 'Поддержка RaskroyPro · ' else 'Официальный представитель RaskroyPro · ' end || support_name(auth.uid()) || ' → ' || support_name(c.user_id), c.user_id, 'reply', b);
   update support_cards set last_staff_at = now(),
     taken_by = coalesce(taken_by, auth.uid()),
     status = case when p_status in ('work', 'details', 'dev') and status not in ('done', 'rejected') then p_status

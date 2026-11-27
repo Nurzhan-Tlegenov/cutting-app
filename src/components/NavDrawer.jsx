@@ -281,7 +281,7 @@ export default function NavDrawer({ notices, unread }) {
   sections.push(common)
   // поддержка — мастер-аккаунту и сотрудникам поддержки (роль выдаёт мастер); разделов мастера сотрудник не видит
   // партнёр RaskroyPro (migration_partners.sql): свои клиенты и их обращения
-  if (supRole === 'partner' && !isMaster) sections.push({ id: 'partner', icon: I.headset, title: 'Партнёр RaskroyPro', sub: 'Внедрение · ваши клиенты', items: [
+  if (supRole === 'partner' && !isMaster) sections.push({ id: 'partner', icon: I.headset, title: 'Официальный представитель RaskroyPro', sub: 'Ваши клиенты и их обращения', items: [
     { icon: I.users, label: 'Мои клиенты и приглашения', on: pathname === '/partner', act: () => go('/partner') },
     { icon: I.inbox, label: 'Обращения клиентов', on: pathname.startsWith('/support'), act: () => go('/support') },
   ] })

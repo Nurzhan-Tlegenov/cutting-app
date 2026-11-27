@@ -6,12 +6,12 @@ import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { partnerMe } from '../lib/support'
 
-// «Партнёр RaskroyPro» (migration_partners.sql): статус выдаёт мастер-аккаунт технологу-внедренцу.
+// «Официальный представитель RaskroyPro» (migration_partners.sql): статус выдаёт мастер-аккаунт технологу-внедренцу.
 // Кого партнёр пригласил своими ссылками («Пригласить производство», «Пригласить знакомого») — закрепляется за ним;
 // обращения этих пользователей приходят партнёру (раздел «Поддержка» → только свои клиенты), он отвечает им сам
 // и при необходимости передаёт задачу разработчику («Нужен разработчик»).
 export default function PartnerPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const [me, setMe] = useState(undefined)
   const [err, setErr] = useState('')
@@ -20,11 +20,11 @@ export default function PartnerPage() {
     partnerMe().then(r => { if (!alive) return; if (r.error) setErr(r.error); setMe(r.data || null) })
     return () => { alive = false }
   }, [user?.id])
-  const head = <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Партнёр RaskroyPro</h1></div>
+  const head = <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Официальный представитель RaskroyPro</h1></div>
   if (me === undefined) return <div className="page"><CncLoader label="Открываем…" /></div>
   if (!me) return (
     <div className="page" style={{ paddingBottom: 100 }}>{head}
-      <div className="card"><p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{err || 'Статус «Партнёр RaskroyPro» выдаёт разработчик — технологам, которые внедряют приложение на производствах. Напишите в поддержку, если хотите стать партнёром.'}</p></div>
+      <div className="card"><p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{err || 'Статус «Официальный представитель RaskroyPro» выдаёт разработчик — технологам, которые внедряют приложение на производствах. Напишите в поддержку, если хотите стать партнёром.'}</p></div>
       <BottomNav />
     </div>
   )
@@ -32,7 +32,8 @@ export default function PartnerPage() {
   return (
     <div className="page" style={{ paddingBottom: 100 }}>{head}
       <div className="card" style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 15, fontWeight: 600 }}>🤝 {me.title || 'Партнёр по внедрению'}</div>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>🤝 Официальный представитель RaskroyPro</div>
+        <div style={{ fontSize: 14, marginTop: 2 }}>{String(profile?.full_name || '').trim() || 'Имя не указано — заполните в «Профиле»'}{me.title ? ` · ${me.title}` : ''}</div>
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '6px 0 10px', lineHeight: 1.45 }}>
           Производства и пользователи, которых вы пригласили своей ссылкой, закрепляются за вами. Их обращения приходят вам — в «Обращения клиентов»:
           вы отвечаете им сами, а если нужна доработка приложения — «Нужен разработчик», задача уходит разработчику.

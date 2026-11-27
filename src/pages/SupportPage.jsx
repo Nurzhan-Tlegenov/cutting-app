@@ -120,7 +120,7 @@ export default function SupportPage() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>№{c.num}</span>
           <span style={{ fontSize: 13.5, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.author}</span>
-          {c.partner_name && !partner && <span title="Клиент партнёра — обращением занимается партнёр" style={{ fontSize: 10.5, padding: '1px 6px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🤝 {c.partner_name}</span>}
+          {c.partner_name && !partner && <span title="Клиент официального представителя — обращением занимается он" style={{ fontSize: 10.5, padding: '1px 6px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🤝 {c.partner_name}</span>}
           <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>{supAgo(c.closed_at || c.last_user_at || c.created_at)}</span>
         </div>
         {(c.city || c.country) && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{[c.city, c.country].filter(Boolean).join(', ')}</div>}
