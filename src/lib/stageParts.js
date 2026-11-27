@@ -19,6 +19,17 @@ export function defaultRule(name) {
   if (/достав|deliver|отгруз/.test(n)) return { list: 'none' }
   return { list: 'all' }
 }
+// Участок раскроя поста: пост только для пильного центра / фрезера ЧПУ (нестинг) / форматки — rule.cut.
+// Заказ, раскроенный другим алгоритмом, этот пост пропускает сам (как post_cut_kind в базе, migration_cut_route_extra.sql)
+export const CUT_KINDS = [['any', 'любой'], ['beam', 'пильный центр'], ['cnc', 'фрезер ЧПУ (нестинг)'], ['saw', 'форматка']]
+export function cutKindOf(rule, name) {
+  if (rule && 'cut' in rule) return ['beam', 'cnc', 'saw'].includes(rule.cut) ? rule.cut : null
+  const n = String(name || '').toLowerCase()
+  if (/пильн/.test(n)) return 'beam'
+  if (/(нестинг|nesting|фрез|чпу|cnc)/.test(n)) return 'cnc'
+  if (/форматк/.test(n)) return 'saw'
+  return null
+}
 export const ruleOf = (rule, name) => (rule && rule.list ? rule : defaultRule(name))
 /**
  * Когда пост пропускается сам: 'edge' — в заказе нет деталей с кромкой, 'drill' — нет присадки, null — не пропускается.

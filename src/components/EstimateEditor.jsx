@@ -8,6 +8,7 @@ import { money } from '../lib/pricing'
 import { baseLines, extraLines, applyEstimate, emptyEstimate, isCustom, loadEstimate, saveEstimate, estimateKey } from '../lib/estimateEdit'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { syncProductionReports } from '../lib/productionReports'
+import { supabase } from '../lib/supabase'
 
 // Своя смета перед PDF (кабинет производства): строки прайса можно поправить или убрать, добавить свои
 // (материал — листы × цена, кромка, доставка, упаковка…), или считать без прайса — только своими строками.
@@ -41,6 +42,19 @@ function opsOf(st) {
   return list.filter(([, q]) => Number(q) > 0).map(([title, q, unit, keys]) => ({ title, qty: r2(q), unit, keys }))
 }
 let uid = 0
+// свои строки сметы закрепляются за заказом (migration_cut_route_extra.sql) — видны в «Итогах» по заказу и за период.
+// Пишет только владелец производства; база без таблицы или чужой заказ — молча пропускаем (PDF работает как раньше)
+const pushTimers = {}
+function pushExtra(order, mat, est) {
+  if (!order?.id || !order?.production_id) return
+  const k = `${order.id}|${mat?.name || ''}|${mat?.thickness || ''}`
+  clearTimeout(pushTimers[k])
+  pushTimers[k] = setTimeout(() => {
+    const lines = extraLines(est).filter(x => String(x.title || '').trim() || x.sum)
+      .map(x => ({ title: String(x.title || '').trim() || 'Прочее', qty: x.qty, unit: x.unit || '', rate: x.rate, sum: x.sum }))
+    supabase.rpc('set_order_extra', { p_order: order.id, p_mat: `${mat?.name || ''}|${mat?.thickness || ''}`, p_lines: lines, p_currency: est?.cur || '' }).then(() => {}, () => {})
+  }, 800)
+}
 const newId = () => `x${Date.now().toString(36)}${++uid}`
 
 export function EstimateEditor({ quote, stats, mat, est, onChange }) {
@@ -149,7 +163,7 @@ export function useEstimate(order, mat) {
   const key = estimateKey(order, mat)
   const [state, setState] = useState(() => ({ key, est: loadEstimate(user, key) }))
   const est = state.key === key ? state.est : loadEstimate(user, key)
-  const setEst = next => { setState({ key, est: next }); saveEstimate(user, key, next) }
+  const setEst = next => { setState({ key, est: next }); saveEstimate(user, key, next); pushExtra(order, mat, next) }
   return [est, setEst]
 }
 

@@ -5,7 +5,7 @@ import StageParts from './StageParts'
 import StageProgress from './StageProgress'
 import StageReturn from './StageReturn'
 import { PAY_UNITS } from '../lib/postPay'
-import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf, skipKindOf } from '../lib/stageParts'
+import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf, skipKindOf, CUT_KINDS, cutKindOf } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, stageUnaccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
@@ -53,7 +53,7 @@ export function PostsSection({ members, bare = false }) {
                 <span style={{ width: 20, fontSize: 12, color: 'var(--text-hint)', textAlign: 'right' }}>{i + 1}.</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500 }}>{p.name}{!p.active ? ' · выключен' : ''}{p.queue ? <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--blue)' }}> · заказов на посту: {p.queue}</span> : null}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Детали: {ruleText(ruleOf(p.rule, p.name))}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Детали: {ruleText(ruleOf(p.rule, p.name))}{cutKindOf(p.rule, p.name) ? ` · только раскрой: ${CUT_LABEL[cutKindOf(p.rule, p.name)]}` : ''}</div>
                   <div style={{ fontSize: 11, color: (p.members || []).length ? 'var(--text-muted)' : 'var(--amber)' }}>
                     {(p.members || []).length ? (p.members || []).map(u => { const m = staff.find(x => x.user_id === u) || (members || []).find(x => x.user_id === u); return m?.name || m?.full_name || 'сотрудник' }).join(', ') : 'сотрудники не закреплены — заказ на этом посту увидят только владелец и начальник'}
                   </div>
@@ -261,13 +261,15 @@ function PayEditor({ pay, busy, onSave }) {
   )
 }
 
+const CUT_LABEL = Object.fromEntries(CUT_KINDS)
 const SKIP_OPTS = [['edge', 'если в заказе нет кромки'], ['drill', 'если в заказе нет присадки'], ['off', 'не пропускать']]
 
 /** Какие детали идут через пост: все, с кромкой, с присадкой (что учитывать), без списка */
 function RuleEditor({ post, busy, onSave }) {
   const r = ruleOf(post.rule, post.name)
   const skip = skipKindOf(post.rule, post.name) || 'off'
-  const set = patch => onSave({ ...r, ...(post.rule && 'skipIf' in post.rule ? { skipIf: post.rule.skipIf } : {}), ...patch })
+  const cut = cutKindOf(post.rule, post.name) || 'any'
+  const set = patch => onSave({ ...r, ...(post.rule && 'skipIf' in post.rule ? { skipIf: post.rule.skipIf } : {}), ...(post.rule && 'cut' in post.rule ? { cut: post.rule.cut } : {}), ...patch })
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Детали на посту (сканируют бирки и отмечают, что прошло):</div>
@@ -281,6 +283,10 @@ function RuleEditor({ post, busy, onSave }) {
       <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 4px' }}>Пропускать пост сам (заказ сразу идёт на следующий пост):</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {SKIP_OPTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(skip === k)} onClick={() => set({ skipIf: k })}>{skip === k ? '✓ ' : ''}{l}</button>)}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 4px' }}>Участок раскроя — заказ идёт через этот пост, только если раскроен этим алгоритмом (иначе пост пропускается сам):</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {CUT_KINDS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(cut === k)} onClick={() => set({ cut: k })}>{cut === k ? '✓ ' : ''}{l}</button>)}
       </div>
       <PayEditor pay={post.rule?.pay} busy={busy} onSave={pay => set({ pay })} />
       {r.list === 'edge' && (

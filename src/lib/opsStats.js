@@ -92,3 +92,26 @@ export function sumLines(list) {
   }
   return [...m.values()].sort((a, b) => b.sum - a.sum)
 }
+
+/** свои строки сметы заказа (order_extra_lines) → [{ title, unit, qty, sum, currency }] */
+export function extraRows(o) {
+  const ls = Array.isArray(o?.extra) ? o.extra : []
+  const cur = o?.extra_currency || o?.currency || ''
+  return ls.filter(l => l && (num(l.sum) > 0 || String(l.title || '').trim())).map(l => ({ key: 'x:' + String(l.title || '').trim().toLowerCase() + '|' + (l.unit || ''), title: String(l.title || '').trim() || 'Прочее', unit: l.unit || '', qty: num(l.qty), sum: num(l.sum), currency: cur }))
+}
+export const extraSum = o => extraRows(o).reduce((a, l) => a + l.sum, 0)
+/** свои строки за период — по названию */
+export function sumExtra(list) {
+  const m = new Map()
+  for (const o of list || []) for (const l of extraRows(o)) {
+    const k = l.key + '|' + l.currency, cur = m.get(k)
+    if (cur) { cur.qty += l.qty; cur.sum += l.sum } else m.set(k, { ...l })
+  }
+  return [...m.values()].sort((a, b) => b.sum - a.sum)
+}
+/** заказ для итогов: свои строки входят в сумму заказа */
+export function withExtra(o) {
+  const x = extraSum(o)
+  if (!x) return o
+  return { ...o, total: (o.total == null ? 0 : Number(o.total)) + x, currency: o.currency || o.extra_currency || '', workTotal: o.total }
+}

@@ -63,6 +63,13 @@ export async function setOrderOp(orderId, postId, on) { const r = await call('se
  * присадка не нужна). Решается по деталям заказа и правилу поста. -> сколько постов пропущено
  */
 export async function planStages(orderId) {
+  // посты не своего раскроя: раскроен на пильном центре — «Нестинг» пропускается, на фрезере — «Пильный центр»
+  let cutN = 0
+  try { const c = await call('stage_cut_skip', { p_order: orderId }); cutN = Number(c.data?.skipped) || 0 } catch { /* база без migration_cut_route_extra.sql */ }
+  const n0 = await planPartStages(orderId)
+  return cutN + n0
+}
+async function planPartStages(orderId) {
   const st = await orderStages(orderId)
   // нужен ли пост, решают детали заказа и настройка поста «Пропускать пост» (нет кромки / нет присадки)
   const kindOf = s => skipRuleOf(s.rule, s.name)

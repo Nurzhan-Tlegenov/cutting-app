@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { money } from '../lib/pricing'
-import { opsRows, sumOps, lineRows, sumLines } from '../lib/opsStats'
+import { opsRows, sumOps, lineRows, sumLines, extraRows, sumExtra, withExtra } from '../lib/opsStats'
 
 // Статистика заказов производства за период: заявки, что в работе и исполнено, листы, суммы и объёмы работ.
 // Используется в кабинете производства (своё) и в мастер-аккаунте (все производства).
@@ -124,7 +124,7 @@ const opLine = (l, v, key) => (
   </div>
 )
 /** операции: сколько сделано и, если есть прайс, на какую сумму. rows — opsRows/sumOps, lines — lineRows/sumLines */
-function OpsList({ rows, lines }) {
+function OpsList({ rows, lines, extra = [] }) {
   return (
     <>
       {rows.length > 0 && <>
@@ -135,19 +135,23 @@ function OpsList({ rows, lines }) {
         <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 2px' }}>По прайсу — на какую сумму</div>
         {lines.map(l => opLine(`${l.title}${l.qty ? ` · ${n2(l.qty)}${l.unit ? ' ' + l.unit : ''}` : ''}`, money(l.sum, l.currency), l.key + l.currency))}
       </>}
-      {!rows.length && !lines.length && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: '4px 0' }}>Записи операций нет — заказ оформлен до того, как она стала сохраняться.</p>}
+      {extra.length > 0 && <>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 2px' }}>Свои строки сметы</div>
+        {extra.map(l => opLine(`${l.title}${l.qty ? ` · ${n2(l.qty)}${l.unit ? ' ' + l.unit : ''}` : ''}`, money(l.sum, l.currency), l.key + l.currency))}
+      </>}
+      {!rows.length && !lines.length && !extra.length && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: '4px 0' }}>Записи операций нет — заказ оформлен до того, как она стала сохраняться.</p>}
     </>
   )
 }
 /** все операции за период — сумма по принятым и исполненным заказам */
 function PeriodOps({ list }) {
   const acc = list.filter(accepted)
-  const rows = sumOps(acc), lines = sumLines(acc)
-  if (!rows.length && !lines.length) return null
+  const rows = sumOps(acc), lines = sumLines(acc), extra = sumExtra(acc)
+  if (!rows.length && !lines.length && !extra.length) return null
   return (
     <details style={{ marginTop: 8, borderTop: '0.5px solid var(--border)', paddingTop: 4 }}>
       <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Все операции за период · заказов {acc.length}</summary>
-      <OpsList rows={rows} lines={lines} />
+      <OpsList rows={rows} lines={lines} extra={extra} />
     </details>
   )
 }
@@ -185,7 +189,7 @@ export function OrderBreakdown({ list, show, onOpen, test }) {
             {openId === o.id && (
               <div onClick={e => e.stopPropagation()} style={{ margin: '4px 0 2px', padding: '4px 8px 6px', background: 'var(--bg2)', borderRadius: 'var(--radius)', cursor: 'default' }}>
                 {o.order_number && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>№ {o.order_number}</div>}
-                <OpsList rows={opsRows(o.stats)} lines={lineRows(o)} />
+                <OpsList rows={opsRows(o.stats)} lines={lineRows(o)} extra={extraRows(o)} />
                 {onOpen && !o.deleted && <button type="button" className="btn-secondary" style={{ marginTop: 6, padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(o)}>Открыть заказ</button>}
               </div>
             )}
@@ -217,7 +221,7 @@ export function Results({ list, per, show, onShow, onOpen, test }) {
   const [setup, setSetup] = useState(false)
   const toggle = () => setOpen(v => { try { sessionStorage.setItem('resultsOpen', v ? '0' : '1') } catch { /* без памяти */ } return !v })
   // тестовые заказы (убраны из итогов) не считаются нигде; их список — отдельно, внизу, с возвратом
-  const inP = per.inPeriod(list.filter(o => !o.excluded)), t = totals(inP)
+  const inP = per.inPeriod(list.filter(o => !o.excluded)).map(withExtra), t = totals(inP)
   const tests = per.inPeriod(list.filter(o => o.excluded))
   const label = PERIODS.find(p => p[0] === per.period)?.[1] || ''
   return (
