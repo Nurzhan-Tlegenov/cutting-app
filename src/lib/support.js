@@ -150,7 +150,7 @@ export const supportCardOrders = cardId => callP('support_card_orders', { p_card
 export const supportOrderData = (cardId, orderId, full = false) => callP('support_order_data', { p_card: cardId, p_order: orderId, p_full: !!full })
 
 // ── Партнёры (migration_partners.sql) ──
-export const PARTNER_SQL_HINT = 'Статус «Партнёр» появится после migration_partners.sql в Supabase.'
+export const PARTNER_SQL_HINT = 'Раздел ещё не включён в базе (migration_partners.sql) — сообщите разработчику.'
 const pcall = async (fn, args) => { const r = await call(fn, args); return r.missing ? { ...r, error: PARTNER_SQL_HINT } : r }
 /** мастер: [{ user_id, title, active, added_at, full_name, phone, clients }] */
 export const adminPartners = () => pcall('admin_partners')
