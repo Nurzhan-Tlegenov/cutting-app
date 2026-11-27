@@ -63,10 +63,11 @@ export const lineTitle = key => {
   let m = /^cut_sheet_(\d+)$/.exec(key); if (m) return `Раскрой листа ${PL[m[1]] || m[1]}`
   m = /^unload_(\d+)$/.exec(key); if (m) return `Разгрузка, лист ${PL[m[1]] || m[1]}`
   m = /^edge_(\d+)_([abc])$/.exec(key); if (m) return `Кромка ${EL[m[2]]} мм · плита ${PL[m[1]] || m[1]}`
+  m = /^(edge_)?hole_d:(.+)$/.exec(key); if (m) return `Отверстие ${m[1] ? 'в торец' : 'в пласть'} Ø${String(m[2]).replace('.', ',')}`
   m = /^hole_([abcd])$/.exec(key); if (m) return `Отверстие в пласть ${Object.fromEntries(HOLE_CLASSES)[m[1]]}`
   return key
 }
-export const lineUnit = key => LINE_UNIT[key] || (/^(cut_sheet|unload)_/.test(key) ? 'л.' : /^edge_\d+_/.test(key) ? 'м' : /^hole_/.test(key) ? 'шт.' : '')
+export const lineUnit = key => LINE_UNIT[key] || (/^(cut_sheet|unload)_/.test(key) ? 'л.' : /^edge_\d+_/.test(key) ? 'м' : /^(edge_)?hole_/.test(key) ? 'шт.' : '')
 /** Клиенты производства — для категорий «розница» / «постоянный» (migration_price_thickness.sql) -> { data } | { error } */
 export async function productionClients(productionId) {
   try {

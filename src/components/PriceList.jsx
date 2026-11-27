@@ -27,7 +27,9 @@ export default function PriceList({ production, onClose }) {
   const sortTiers = list => list.filter(t => String(t.price ?? '') !== '').sort((a, b) => (Number(String(a.to).replace(',', '.')) || Infinity) - (Number(String(b.to).replace(',', '.')) || Infinity))
   const save = async () => {
     setBusy(true); setError('')
-    const out = { ...data, tiers: sortTiers(tiers), hdf_tiers: sortTiers(hdfTiers) }
+    const dia = key => (Array.isArray(data[key]) ? data[key] : []).filter(r => Number(String(r.d).replace(',', '.')) > 0 && String(r.price ?? '') !== '')
+      .sort((a, b) => Number(String(a.d).replace(',', '.')) - Number(String(b.d).replace(',', '.')))
+    const out = { ...data, tiers: sortTiers(tiers), hdf_tiers: sortTiers(hdfTiers), hole_list: dia('hole_list'), edge_hole_list: dia('edge_hole_list') }
     const r = await savePrices(production.id, out)
     setBusy(false)
     if (r.error) setError(r.error); else { setData(out); setSaved(true) }
@@ -55,7 +57,7 @@ export default function PriceList({ production, onClose }) {
     )
   }
   // цены по классам (толщина плиты, диаметр): строка «название — поле»; пустое поле — серым цена по умолчанию
-  const filled = keys => keys.some(k => String(data?.[k] ?? '') !== '')
+  const filled = keys => keys.some(k => (Array.isArray(data?.[k]) ? data[k].some(r => r.d && r.price) : String(data?.[k] ?? '') !== ''))
   const classList = (prefix, list, base, hint) => (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 8px', alignItems: 'center', marginTop: 4 }}>
       {list.map(([c, l]) => (
@@ -68,11 +70,25 @@ export default function PriceList({ production, onClose }) {
       {hint && <div style={{ gridColumn: '1 / -1' }}><Hint>{hint}</Hint></div>}
     </div>
   )
-  const section = (title, keys, body) => (
-    <details open={filled(keys)} style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
-      <summary style={{ fontSize: 13, cursor: 'pointer' }}>{title}{filled(keys) ? ' ✓' : ''}</summary>
-      {body}
-    </details>
+  const section = (title, keys, body) => <Sec title={title} on={filled(keys)}>{body}</Sec>
+  // свои строки «диаметр → цена»: [{ d, price }]
+  const diaRows = key => (Array.isArray(data?.[key]) ? data[key] : [])
+  const setDia = (key, i, k, v) => set(key, diaRows(key).map((r, j) => (j === i ? { ...r, [k]: clean(v) } : r)))
+  const diaList = (key, title, base) => (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 4px' }}>{title}</div>
+      {diaRows(key).map((r, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+          <span style={{ fontSize: 13, flex: '0 0 auto' }}>Ø</span>
+          <input type="text" inputMode="decimal" placeholder="мм" value={r.d ?? ''} onChange={e => setDia(key, i, 'd', e.target.value)} style={{ ...inp, width: 64, flex: '0 0 auto' }} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>мм — за отверстие</span>
+          <input type="text" inputMode="decimal" placeholder={data[base] ? String(data[base]) : 'цена'} value={r.price ?? ''} onChange={e => setDia(key, i, 'price', e.target.value)} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
+          <button type="button" onClick={() => set(key, diaRows(key).filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, padding: '0 2px' }}>×</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => set(key, [...diaRows(key), { d: '', price: '' }])}
+        style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)' }}>+ Добавить диаметр</button>
+    </div>
   )
   const plateKeys = p => PLATE_CLASSES.map(([c]) => p + c)
   const edgeKeys = PLATE_CLASSES.flatMap(([pc]) => EDGE_CLASSES.map(([ec]) => `edge_${pc}_${ec}`))
@@ -140,6 +156,13 @@ export default function PriceList({ production, onClose }) {
                       ))}
                     </div>
                     <Hint>Цена за метр прямой кромки по толщине плиты (строки) и кромки (столбцы). Пустая клетка — как раньше: «Кромка прямая до 1 мм» / «толще 1 мм». Склеенная деталь (2 × 16) считается как плита 30 мм и толще, если у широкой кромки нет своей цены.</Hint>
+                  </div>
+                ))}
+                {g.id === 'drill' && section('Свои диаметры — своя цена', ['hole_list', 'edge_hole_list'], (
+                  <div style={{ marginTop: 4 }}>
+                    {diaList('hole_list', 'В пласть', 'hole')}
+                    {diaList('edge_hole_list', 'В торец', 'edge_hole')}
+                    <Hint>Впишите диаметр и цену за отверстие — например Ø3, Ø4, Ø5, Ø8, Ø35, каждый со своей ценой. Отверстия этих диаметров считаются по своей цене; остальные — по диапазону ниже или по общей цене отверстия.</Hint>
                   </div>
                 ))}
                 {g.id === 'drill' && section('Отверстие в пласть по диаметру', HOLE_CLASSES.map(([c]) => 'hole_' + c), classList('hole_', HOLE_CLASSES, 'hole',
@@ -229,6 +252,20 @@ function RetailCard({ production, data, set, inp }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// раздел прайса, который можно свернуть: открыт сразу, если в нём уже есть цены; дальше — как оставил пользователь
+function Sec({ title, on, children }) {
+  const [open, setOpen] = useState(on)
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+      <button type="button" onClick={() => setOpen(v => !v)} style={{ width: '100%', display: 'flex', gap: 6, alignItems: 'center', background: 'none', border: 'none', padding: 0, fontSize: 13, color: 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
+        <span style={{ color: 'var(--text-hint)', fontSize: 11, transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>
+        <span style={{ flex: 1 }}>{title}{on ? ' ✓' : ''}</span>
+      </button>
+      {open && children}
     </div>
   )
 }

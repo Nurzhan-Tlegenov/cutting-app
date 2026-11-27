@@ -40,6 +40,7 @@ const THICK_FROM = 1          // кромка толще 1 мм считаетс
 // отверстие в пласть — Ø до 10, 11–32, 33–40, больше 40
 export const plateClass = T => (T < 17 ? '16' : T < 22 ? '18' : T < 30 ? '22' : '30')
 export const edgeClass = t => (t <= 0.5 ? 'a' : t <= 1.5 ? 'b' : 'c')
+const dKey = d => String(Math.round((Number(String(d ?? 8).replace(',', '.')) || 8) * 10) / 10)
 export const holeClass = d => (d <= 10 ? 'a' : d <= 32 ? 'b' : d <= 40 ? 'c' : 'd')
 
 export const emptyStats = () => ({
@@ -59,6 +60,7 @@ export const emptyStats = () => ({
                                // она же входит в edgeThinM / edgeThickM (по толщине), а в смете отдельно — если у неё есть своя цена
   hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
   holesD: { a: 0, b: 0, c: 0, d: 0 },   // отверстия в пласть по диаметру (holeClass) — для цен по диаметру
+  holesDd: {}, edgeHolesDd: {},   // отверстия в пласть / в торец по точному диаметру: { '8': шт } — для своих строк «Ø → цена»
   // прямая кромка по толщине плиты и кромки: { '18_b': [м до 1 мм, м толще 1 мм] } (для цены «по толщине»; до/толще 1 мм —
   // чтобы пустая клетка шла по прежней цене); edgeMxG — то же у склеенных деталей (плита — двойной толщины)
   edgeMx: {}, edgeMxG: {},
@@ -95,7 +97,8 @@ export function nestingStats({ order, mat, method }) {
       if (Array.isArray(p.polygon) && p.polygon.length > 2 && !(f.outline.length === 4 && Math.abs(loopArea(f.outline) - p.origX * p.origY) < 1)) st.shapedParts++
       const bf = backFeatures(p, d, T)
       st.holes += f.holes.length + bf.holes.length; st.holesBack += bf.holes.length; st.edgeHoles += f.skipped.edge
-      for (const h of [...f.holes, ...bf.holes]) st.holesD[holeClass(Number(h.d) || 0)]++
+      for (const h of [...f.holes, ...bf.holes]) { st.holesD[holeClass(Number(h.d) || 0)]++; const k = dKey(h.d); st.holesDd[k] = (st.holesDd[k] || 0) + 1 }
+      for (const [k, n] of Object.entries(f.skipped.edgeBy || {})) { const dk = dKey(/Ø([\d.,]+)/.exec(k)?.[1]); st.edgeHolesDd[dk] = (st.edgeHolesDd[dk] || 0) + n }
       if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
       st.pockets += f.pockets.length + bf.pockets.length; st.pocketsBack += bf.pockets.length
       // пазы — с обеих пластей: с изнанки (в т.ч. «Пазы — всегда снизу» при импорте) partFeatures не отдаёт
@@ -180,6 +183,7 @@ export function sumStats(list) {
       else if (k === 'kerf') t.kerf = t.kerf || s.kerf
       else if (k === 'method') t.method = s.method || t.method
       else if (k === 'hdf') t.hdf = t.hdf || !!s.hdf
+      else if (k === 'holesDd' || k === 'edgeHolesDd') for (const [n, v] of Object.entries(s[k] || {})) t[k][n] = (t[k][n] || 0) + v
       else if (k === 'holesD') for (const [n, v] of Object.entries(s.holesD || {})) t.holesD[n] = (t.holesD[n] || 0) + v
       else if (k === 'edgeMx' || k === 'edgeMxG') for (const [n, v] of Object.entries(s[k] || {})) { const c = t[k][n] || (t[k][n] = [0, 0]); c[0] += v[0]; c[1] += v[1] }
       else t[k] += s[k] || 0
@@ -196,6 +200,8 @@ export function statsPayload(st, order = null) {
     sheets: st.sheets.map(s => ({ parts: s.parts, ...(s.t ? { t: s.t } : {}), ...(s.offcut ? { o: 1 } : {}) })),
     parts_m2: r2(st.partsM2),
     ...(Object.values(st.holesD || {}).some(Boolean) ? { hd: st.holesD } : {}),
+    ...(Object.keys(st.holesDd || {}).length ? { hdd: st.holesDd } : {}),
+    ...(Object.keys(st.edgeHolesDd || {}).length ? { ehd: st.edgeHolesDd } : {}),
     ...(Object.keys(st.edgeMx || {}).length ? { em: Object.fromEntries(Object.entries(st.edgeMx).map(([k, v]) => [k, [r2(v[0]), r2(v[1])]])) } : {}),
     ...(Object.keys(st.edgeMxG || {}).length ? { emg: Object.fromEntries(Object.entries(st.edgeMxG).map(([k, v]) => [k, [r2(v[0]), r2(v[1])]])) } : {}),
     // заказчик заказа — для розничного коэффициента, когда смету смотрит само производство (база доверяет ему только у владельца)
