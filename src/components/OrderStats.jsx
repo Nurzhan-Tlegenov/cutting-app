@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { money } from '../lib/pricing'
+import { opsRows, sumOps, lineRows, sumLines } from '../lib/opsStats'
 
 // Статистика заказов производства за период: заявки, что в работе и исполнено, листы, суммы и объёмы работ.
 // Используется в кабинете производства (своё) и в мастер-аккаунте (все производства).
@@ -115,6 +116,42 @@ export function Totals({ t, show }) {
   )
 }
 
+
+const accepted = o => o.status === 'done' || o.status === 'inwork'
+const opLine = (l, v, key) => (
+  <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5, padding: '2px 0' }}>
+    <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>{l}</span><b style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{v}</b>
+  </div>
+)
+/** операции: сколько сделано и, если есть прайс, на какую сумму. rows — opsRows/sumOps, lines — lineRows/sumLines */
+function OpsList({ rows, lines }) {
+  return (
+    <>
+      {rows.length > 0 && <>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '5px 0 2px' }}>Операции — сколько сделано</div>
+        {rows.map(r => opLine(r.label, `${n2(r.value)} ${r.unit}`, r.key))}
+      </>}
+      {lines.length > 0 && <>
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 2px' }}>По прайсу — на какую сумму</div>
+        {lines.map(l => opLine(`${l.title}${l.qty ? ` · ${n2(l.qty)}${l.unit ? ' ' + l.unit : ''}` : ''}`, money(l.sum, l.currency), l.key + l.currency))}
+      </>}
+      {!rows.length && !lines.length && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: '4px 0' }}>Записи операций нет — заказ оформлен до того, как она стала сохраняться.</p>}
+    </>
+  )
+}
+/** все операции за период — сумма по принятым и исполненным заказам */
+function PeriodOps({ list }) {
+  const acc = list.filter(accepted)
+  const rows = sumOps(acc), lines = sumLines(acc)
+  if (!rows.length && !lines.length) return null
+  return (
+    <details style={{ marginTop: 8, borderTop: '0.5px solid var(--border)', paddingTop: 4 }}>
+      <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>Все операции за период · заказов {acc.length}</summary>
+      <OpsList rows={rows} lines={lines} />
+    </details>
+  )
+}
+
 const day = v => new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
 /** Раскладка по заказам: какие работы и на какую сумму сделаны по каждому принятому или исполненному заказу */
 // тестовый заказ: все этапы (от принятия до исполнения) прошёл быстрее времени, заданного мастер-аккаунтом
@@ -124,6 +161,7 @@ const mins = o => { const m = Math.max(0, Math.round(passMs(o) / 60000)); return
 
 // test: { min, master, onExclude(o, on), onAsk(o) } — убрать тестовый заказ из итогов или попросить об этом мастер-аккаунт
 export function OrderBreakdown({ list, show, onOpen, test }) {
+  const [openId, setOpenId] = useState(null)   // развёрнутый заказ: все его операции
   const rows = list.filter(o => o.status === 'done' || o.status === 'inwork').sort((a, b) => orderDate(b) - orderDate(a))
   if (!rows.length) return <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>За этот период принятых и исполненных заказов нет.</p>
   const money1 = on(show, 'sumDone') || on(show, 'sumWork')
@@ -134,15 +172,23 @@ export function OrderBreakdown({ list, show, onOpen, test }) {
         const parts = [on(show, 'sheets') && `листов ${o.sheets || 0}`, on(show, 'parts') && `деталей ${n2(o.parts)}`, ...works(o.stats, show).map(([, l, v, u]) => `${l.toLowerCase()} ${n2(v)} ${u}`)].filter(Boolean)
         const title = String(o.order_name || '').trim() || o.order_number || 'Заказ'
         return (
-          <div key={o.id} onClick={onOpen && !o.deleted ? () => onOpen(o) : undefined} style={{ padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: onOpen && !o.deleted ? 'pointer' : 'default' }}>
+          <div key={o.id} onClick={() => setOpenId(id => (id === o.id ? null : o.id))} style={{ padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
               {money1 && <b style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>{o.total != null ? money(o.total, o.currency) : '—'}</b>}
+              <span style={{ color: 'var(--text-hint)', fontSize: 11, transform: openId === o.id ? 'rotate(180deg)' : 'none' }}>▾</span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
               {o.client_name ? <span style={{ color: 'var(--text-muted)' }}>{o.client_name} · </span> : null}{day(orderDate(o))} · {o.status === 'done' ? 'исполнен' : 'в работе'}{o.deleted ? ' · заказ удалён заказчиком' : ''}
             </div>
-            {parts.length > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{parts.join(' · ')}</div>}
+            {parts.length > 0 && openId !== o.id && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{parts.join(' · ')}</div>}
+            {openId === o.id && (
+              <div onClick={e => e.stopPropagation()} style={{ margin: '4px 0 2px', padding: '4px 8px 6px', background: 'var(--bg2)', borderRadius: 'var(--radius)', cursor: 'default' }}>
+                {o.order_number && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>№ {o.order_number}</div>}
+                <OpsList rows={opsRows(o.stats)} lines={lineRows(o)} />
+                {onOpen && !o.deleted && <button type="button" className="btn-secondary" style={{ marginTop: 6, padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(o)}>Открыть заказ</button>}
+              </div>
+            )}
             {test && o.status === 'done' && (test.master || isFast(o, test.min) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }} onClick={e => e.stopPropagation()}>
                 {passMs(o) != null && <span style={{ fontSize: 11, color: isFast(o, test.min) ? 'var(--amber)' : 'var(--text-hint)' }}>все этапы за {mins(o)}{isFast(o, test.min) ? ' — тест?' : ''}</span>}
@@ -188,6 +234,7 @@ export function Results({ list, per, show, onShow, onOpen, test }) {
         <div style={{ padding: '8px 10px 10px' }}>
           {per.picker}
           <Totals t={t} show={show} />
+          <PeriodOps list={inP} />
           {on(show, 'byOrder') && <OrderBreakdown list={inP} show={show} onOpen={onOpen} test={test} />}
           {!on(show, 'byOrder') && test && inP.some(o => isFast(o, test.min)) && (
             <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>Есть тестовые заказы — прошли все этапы быстрее {test.min} мин ({inP.filter(o => isFast(o, test.min)).length}). Убрать их из итогов можно в «По заказам» — включите его в настройке ниже.</p>
