@@ -15,7 +15,7 @@ import { groupLinesOnSheet, posOfInstance } from './partGroups'
 import { narrowSide, narrowTrimTo } from './edgeCut'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.23'   // β0.23: packBest (лист за листом — самый плотный из вариантов) + перекройка «хвоста» (repackTail)
+export const BEAM_SAW_VERSION = 'β0.24'   // β0.24: группы фасадов не рвутся «узкой полосой в середину» и добором в дыры; β0.23: packBest (лист за листом — самый плотный из вариантов) + перекройка «хвоста» (repackTail)
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -570,9 +570,13 @@ function narrowToMiddle(slots, A, kerf, mid) {
 function layout(node, ox, oy, s, out, stair = false) {
   // 1-й уровень: «от большой к малой» — тоже по готовности (полоса из одной детали во всю длину — готова сразу); Б→М→Б — как задано
   const packed = packGroups(node.slots, node.B)
-  node.slots = unpackGroups(node.level === 1 && stair ? orderStair(packed, node.B)
-    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(packed, 'wnw') : orderByReady(packed, node.level))
-  if (node.level === 1 && s.narrowMid) node.slots = narrowToMiddle(node.slots, node.A, out.kerf, s.narrowMid)
+  let ordered = node.level === 1 && stair ? orderStair(packed, node.B)
+    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(packed, 'wnw') : orderByReady(packed, node.level)
+  // «узкие полосы в середину» — тоже по упакованным полосам: полосы одной группы фасадов (общая текстура) двигаются
+  // только целиком, одним куском и в своём порядке. Раньше узкий фасад группы уезжал в середину листа отдельно от
+  // широких — группа рвалась и рисунок текстуры не сходился
+  if (node.level === 1 && s.narrowMid) ordered = narrowToMiddle(ordered, node.A, out.kerf, s.narrowMid)
+  node.slots = unpackGroups(ordered)
   let pos = node.trim
   if (node.trim > EPS) out.cuts++
   for (const sl of node.slots) {
@@ -608,7 +612,8 @@ function layout(node, ox, oy, s, out, stair = false) {
 function plainTree(node) {
   return {
     axis: node.axis, len: +(node.A).toFixed(2), across: +(node.B).toFixed(2), level: node.level, trim: node.trim,
-    slots: node.slots.map(sl => (sl.piece ? { a: +sl.a.toFixed(2), part: sl.piece.p.id, rot: sl.piece.rot } : { a: +sl.a.toFixed(2), child: plainTree(sl.child) })),
+    // grp — слот блока группы фасадов: при пересборке дерева (добор деталей в дыры листа) группа остаётся целой и в своём порядке
+    slots: node.slots.map(sl => ({ ...(sl.piece ? { a: +sl.a.toFixed(2), part: sl.piece.p.id, rot: sl.piece.rot } : { a: +sl.a.toFixed(2), child: plainTree(sl.child) }), ...(sl.grp ? { grp: sl.grp } : {}) })),
   }
 }
 
@@ -811,8 +816,9 @@ function treeFromPlain(t, byId) {
   const node = { axis: t.axis, A: t.len, B: t.across, level: t.level, trim: t.trim, slots: [] }
   let used = t.trim
   for (const sl of t.slots) {
-    if (sl.part != null) { const p = byId.get(sl.part); if (!p) return null; node.slots.push({ a: sl.a, piece: { p, rot: !!sl.rot }, child: null }) }
-    else { const c = treeFromPlain(sl.child, byId); if (!c) return null; node.slots.push({ a: sl.a, piece: null, child: c }) }
+    const g = sl.grp ? { grp: sl.grp } : {}
+    if (sl.part != null) { const p = byId.get(sl.part); if (!p) return null; node.slots.push({ a: sl.a, piece: { p, rot: !!sl.rot }, child: null, ...g }) }
+    else { const c = treeFromPlain(sl.child, byId); if (!c) return null; node.slots.push({ a: sl.a, piece: null, child: c, ...g }) }
     used += sl.a
   }
   node.used = used

@@ -114,15 +114,22 @@ export function rememberOrderDefaults(patch, user) {
 }
 
 /** Что писать на деталях карты раскроя — выбор идёт за аккаунтом */
+// Один выбор на весь аккаунт: карта раскроя во время поиска, после «Стоп», при просмотре карт (страница заказа,
+// производство), раскладка группы фасадов, список фигурных деталей — везде одна подпись. Поменяли в одном месте —
+// сразу меняется во всех открытых (раньше каждый экран держал свою копию и мог показывать старый выбор)
+const labelSubs = new Set()
 export function useLabelMode(user) {
   const [mode, setMode] = useState(() => read(user).nestLabelMode || 'name')
   const uid = user?.id || null
   useEffect(() => {
     let alive = true
-    fetchUserSettings(user).then(s => { if (alive) setMode(s.nestLabelMode || 'name') })
-    return () => { alive = false }
+    const on = v => { if (alive) setMode(v) }
+    labelSubs.add(on)
+    // свежий выбор с сервера (могли поменять на другом устройстве); свои несохранённые правки новее — их не затираем
+    fetchUserSettings(user).then(s => { if (alive) setMode(read(user).nestLabelMode || s.nestLabelMode || 'name') })
+    return () => { alive = false; labelSubs.delete(on) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid])
-  const set = useCallback(v => { setMode(v); saveUserSettings({ nestLabelMode: v }, user) }, [user])
+  const set = useCallback(v => { saveUserSettings({ nestLabelMode: v }, user); labelSubs.forEach(f => f(v)) }, [user])
   return [mode, set]
 }

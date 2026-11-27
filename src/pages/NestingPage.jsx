@@ -3746,7 +3746,7 @@ export default function NestingPage() {
               const locked = isRunning || isQueued
               const selPartObj = cfg.selPart >= 0 ? canvasSheet.placed[cfg.selPart] : null
               const selBufObj = cfg.selBuf >= 0 ? cfg.buffer[cfg.selBuf] : null
-              const partName = p => `${(p.prefix ? p.prefix + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д')} ${mm(p.origY)}×${mm(p.origX)}`
+              const partName = p => `${(labelMode === 'name' || labelMode === 'none' ? (p.prefix ? p.prefix + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д') : partLabel(p, details, labelMode))} ${mm(p.origY)}×${mm(p.origX)}`   // подпись — как на карте
               const chip = (active, color) => ({
                 flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none', fontSize: 12, cursor: 'pointer',
                 background: active ? color : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',

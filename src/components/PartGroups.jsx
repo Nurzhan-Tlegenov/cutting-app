@@ -1,6 +1,9 @@
 import { useState, useRef } from 'react'
 import { groupsOf, groupDir, groupColor, groupRows, posOfInstance } from '../lib/partGroups'
 import { useBackClose } from '../lib/backStack'
+import { useAuth } from '../context/AuthContext'
+import { useLabelMode } from '../lib/userSettings'
+import { partLabel, LABEL_MODES } from '../lib/partLabel'
 
 // Группы деталей с общей текстурой (фасады одного шкафа): детали группы раскрой кладёт в одну полосу подряд, в порядке
 // списка, без поворота — рисунок текстуры переходит с детали на деталь. У детали: part_group — имя группы,
@@ -109,6 +112,8 @@ export function GroupChip({ detail, groups, active, onChange }) {
 // в part_group_pos = «ряд.место». Деталь с qty > 1 — одним прямоугольником «×N» (экземпляры идут подряд на её месте).
 // Зазор на рез добавит сам раскрой — по инструменту выбранного станка.
 function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
+  const { user } = useAuth()
+  const [labelMode, setLabelMode] = useLabelMode(user)
   const vert = dir !== 'x'
   // элементы — экземпляры деталей (деталь ×2 — два отдельных фасада, каждый двигается сам)
   const mine = details.map((d, i) => ({ d, i })).filter(({ d }) => (d.part_group || '').trim() === group)
@@ -225,7 +230,13 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
   const tidyNow = () => { setPts(new Map([...tidyRects].map(([k, r]) => [k, { x: r.x, y: r.y }]))); setZoom({ z: 1, px: 0, py: 0 }) }
   const btn = { padding: '2px 6px', border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1.2 }
   const fs = field / 42                                   // размер шрифта в мм поля — как подписи на карте
-  const lab = m => (m.d.name ? m.d.name.slice(0, 14) : `#${m.i + 1}`)
+  // подпись фасада — как на карте раскроя (выбор идёт за аккаунтом): наименование, позиция, обозначение или вместе;
+  // нет такого свойства у детали — наименование, нет и его — номер строки бланка (#3)
+  const lab = m => {
+    const mode = labelMode === 'none' ? 'pos_name' : labelMode
+    const t = partLabel({ label: m.d.name || '', prefix: m.d.prefix, detailIndex: m.i }, details, mode).trim()
+    return (t || `#${m.i + 1}`).slice(0, 18)
+  }
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '14px 14px 0 0', width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', padding: '12px 14px 18px' }}>
@@ -233,6 +244,13 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
           <b style={{ color, fontSize: 15, flex: 1 }}>⧉ {group} — раскладка</b>
           <button type="button" onClick={tidyNow} style={btn} title="Собрать фасады плотно по рядам">Собрать</button>
           <button type="button" onClick={onClose} style={{ ...btn, fontSize: 16 }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 12, color: 'var(--text-hint)' }}>
+          Подпись:
+          <select value={labelMode === 'none' ? 'pos_name' : labelMode} onChange={e => setLabelMode(e.target.value)} title="Что писать на фасадах — то же выбирается на карте раскроя"
+            style={{ width: 'auto', minWidth: 0, maxWidth: 200, padding: '4px 6px', fontSize: 13 }}>
+            {LABEL_MODES.filter(([v]) => v !== 'none').map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
         </div>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>
           Фасады стоят как на карте раскроя: текстура (длина) по вертикали. Двигайте каждый пальцем куда нужно — он остаётся там, где отпустили, и прилипает к соседям. Раскрой возьмёт порядок {vert ? 'рядами сверху вниз' : 'колонками слева направо'}; зазор на рез добавит сам. Деталь «2 шт.» — два отдельных фасада.

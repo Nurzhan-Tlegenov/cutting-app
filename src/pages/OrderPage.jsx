@@ -11,7 +11,7 @@ import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import MaterialFilter from '../components/MaterialFilter'
 import { detailMatKey } from '../lib/detailMaterial'
-import { detailMeta, metaPos, metaDes } from '../lib/partLabel'
+import { detailMeta, metaPos, metaDes, LABEL_MODES } from '../lib/partLabel'
 import Model3DButton from '../components/Model3DButton'
 import { edgeTotals } from '../lib/edgeLength'
 import CncLoader from '../components/CncLoader'
@@ -62,7 +62,7 @@ export default function OrderPage() {
   const [edgeMemTick, setEdgeMemTick] = useState(0)   // сохранённые обозначения кромки (за аккаунтом) поменялись
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
-  const [labelMode] = useLabelMode(user)
+  const [labelMode, setLabelMode] = useLabelMode(user)   // подпись на деталях — одна на аккаунт, как на странице раскроя
   const [mapMat, setMapMat] = useState('')        // материал, чьи карты раскроя показаны
   const [partSel, setPartSel] = useState([])       // производство: детали для отдельных управляющих программ (id строк)
   const [partFull, setPartFull] = useState(0)        // «Выбрать детали с обработкой» — программы деталей во весь экран (один раз)
@@ -389,6 +389,13 @@ export default function OrderPage() {
                 {nestings.map(n => <option key={n.key} value={n.key}>{n.label}</option>)}
               </select>
             )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 11, color: 'var(--text-hint)' }}>
+            Подпись на деталях:
+            <select value={labelMode} onChange={e => setLabelMode(e.target.value)}
+              style={{ width: 'auto', minWidth: 0, maxWidth: 170, padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}>
+              {LABEL_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
           </div>
           <SheetsOverview sheets={nest.sheets} details={nest.details} labelMode={labelMode}
             sameFill={userSameAlpha(user) ? sameColorMap(nest.details) : null} sameAlpha={userSameAlpha(user)}
