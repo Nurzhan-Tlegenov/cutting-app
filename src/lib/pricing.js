@@ -63,7 +63,7 @@ export const lineTitle = key => {
   let m = /^cut_sheet_(\d+)$/.exec(key); if (m) return `Раскрой листа ${PL[m[1]] || m[1]}`
   m = /^unload_(\d+)$/.exec(key); if (m) return `Разгрузка, лист ${PL[m[1]] || m[1]}`
   m = /^edge_(\d+)_([abc])$/.exec(key); if (m) return `Кромка ${EL[m[2]]} мм · плита ${PL[m[1]] || m[1]}`
-  m = /^(edge_)?hole_d:(.+)$/.exec(key); if (m) return `Отверстие ${m[1] ? 'в торец' : 'в пласть'} Ø${String(m[2]).replace('.', ',')}`
+  m = /^(edge_)?hole_([dr]):(.+)$/.exec(key); if (m) return `Отверстие ${m[1] ? 'в торец' : 'в пласть'} Ø${String(m[3]).replace(/\./g, ',').replace('-', '–')}`
   m = /^hole_([abcd])$/.exec(key); if (m) return `Отверстие в пласть ${Object.fromEntries(HOLE_CLASSES)[m[1]]}`
   return key
 }

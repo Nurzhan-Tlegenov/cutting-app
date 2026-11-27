@@ -20,50 +20,66 @@ create table if not exists public.order_work_stats (
 );
 alter table public.order_work_stats enable row level security;   -- политик нет: только через функции
 
--- Свои строки «диаметр → цена» (отдельной функцией — чтобы SQL помещался при вставке с телефона).
--- -> { lines, total, s } — s: статистика, где отверстия этих диаметров уже вычтены
+-- Свои строки цены отверстий: [{ d, to, price }] — «до» пусто: точный диаметр (Ø8), задано: свой диапазон (Ø3–10).
+-- Точный диаметр важнее диапазона; отверстия, уже посчитанные строкой, дальше не считаются. -> { lines, total, left }
+create or replace function public.quote_dia_one(p_list jsonb, p_cnt jsonb, p_pfx text) returns jsonb
+language plpgsql immutable set search_path = public as $$
+declare lines jsonb := '[]'::jsonb; total numeric := 0; lft jsonb := coalesce(p_cnt, '{}'::jsonb); it jsonb; a numeric; b numeric; x numeric; rate numeric; q numeric; e record; pass int; nm text;
+begin
+if jsonb_typeof(p_list) <> 'array' or jsonb_typeof(lft) <> 'object' then return jsonb_build_object('lines', lines, 'total', 0, 'left', lft); end if;
+for pass in 1..2 loop
+for it in select value from jsonb_array_elements(p_list) limit 100 loop
+a := jnum(it, 'd'); b := jnum(it, 'to'); rate := jnum(it, 'price');
+if a <= 0 or rate <= 0 or (pass = 1) <> (b <= 0) then continue; end if;
+if b > 0 and b < a then x := a; a := b; b := x; end if;
+q := 0;
+for e in select key, value from jsonb_each_text(lft) loop
+if e.key !~ '^[0-9]+([.][0-9]+)?$' or e.value::numeric <= 0 then continue; end if;
+if (b <= 0 and abs(e.key::numeric - a) < 0.05) or (b > 0 and e.key::numeric >= a - 0.05 and e.key::numeric <= b + 0.05) then
+q := q + e.value::numeric; lft := lft || jsonb_build_object(e.key, 0);
+end if;
+end loop;
+if q > 0 then
+nm := (case when a::text like '%.%' then rtrim(rtrim(a::text, '0'), '.') else a::text end);
+if b > 0 then nm := 'r:' || nm || '-' || (case when b::text like '%.%' then rtrim(rtrim(b::text, '0'), '.') else b::text end); else nm := 'd:' || nm; end if;
+lines := lines || jsonb_build_object('group', 'drill', 'key', p_pfx || '_' || nm, 'qty', q, 'rate', rate, 'sum', round(q * rate, 2));
+total := total + round(q * rate, 2);
+end if;
+end loop;
+end loop;
+return jsonb_build_object('lines', lines, 'total', total, 'left', lft);
+end $$;
+
+-- Свои строки для отверстий в пласть (hole_list по hdd) и в торец (edge_hole_list по ehd).
+-- -> { lines, total, s } — s: статистика, где посчитанные строками отверстия уже вычтены (и из диапазонов hd)
 create or replace function public.quote_dia(pr jsonb, s jsonb) returns jsonb
 language plpgsql immutable set search_path = public as $$
-declare lines jsonb := '[]'::jsonb; total numeric := 0; it jsonb; dd numeric; rate numeric; q numeric; hd jsonb; used jsonb; rest numeric; c text;
+declare lines jsonb := '[]'::jsonb; total numeric := 0; r jsonb; hd jsonb; e record; got numeric; done numeric; c text;
 begin
-  -- свои строки «диаметр → цена» (точный диаметр): в пласть (hole_list, по hdd) и в торец (edge_hole_list, по ehd).
-  -- Отверстия этих диаметров — по своей цене, остальные дальше — по диапазону или общей цене
-  if jsonb_typeof(pr->'hole_list') = 'array' and jsonb_typeof(s->'hdd') = 'object' then
-    hd := case when jsonb_typeof(s->'hd') = 'object' then s->'hd' else '{}'::jsonb end;
-    rest := jnum(s, 'holes'); used := '[]'::jsonb;
-    for it in select value from jsonb_array_elements(pr->'hole_list') limit 100 loop
-      dd := jnum(it, 'd'); rate := jnum(it, 'price');
-      if dd <= 0 or rate <= 0 or used ? dd::text then continue; end if;
-      used := used || to_jsonb(dd::text);
-      select coalesce(sum(e.value::numeric), 0) into q from jsonb_each_text(s->'hdd') e
-        where e.key ~ '^[0-9]+([.][0-9]+)?$' and abs(e.key::numeric - dd) < 0.05;
-      if q > 0 then
-        lines := lines || jsonb_build_object('group', 'drill', 'key', 'hole_d:' || (case when dd::text like '%.%' then rtrim(rtrim(dd::text, '0'), '.') else dd::text end), 'qty', q, 'rate', rate, 'sum', round(q * rate, 2));
-        total := total + round(q * rate, 2);
-        rest := rest - q;
-        c := case when dd <= 10 then 'a' when dd <= 32 then 'b' when dd <= 40 then 'c' else 'd' end;
-        hd := hd || jsonb_build_object(c, greatest(jnum(hd, c) - q, 0));
-      end if;
-    end loop;
-    s := s || jsonb_build_object('holes', greatest(rest, 0), 'hd', hd);
-  end if;
-  if jsonb_typeof(pr->'edge_hole_list') = 'array' and jsonb_typeof(s->'ehd') = 'object' then
-    rest := jnum(s, 'edge_holes'); used := '[]'::jsonb;
-    for it in select value from jsonb_array_elements(pr->'edge_hole_list') limit 100 loop
-      dd := jnum(it, 'd'); rate := jnum(it, 'price');
-      if dd <= 0 or rate <= 0 or used ? dd::text then continue; end if;
-      used := used || to_jsonb(dd::text);
-      select coalesce(sum(e.value::numeric), 0) into q from jsonb_each_text(s->'ehd') e
-        where e.key ~ '^[0-9]+([.][0-9]+)?$' and abs(e.key::numeric - dd) < 0.05;
-      if q > 0 then
-        lines := lines || jsonb_build_object('group', 'drill', 'key', 'edge_hole_d:' || (case when dd::text like '%.%' then rtrim(rtrim(dd::text, '0'), '.') else dd::text end), 'qty', q, 'rate', rate, 'sum', round(q * rate, 2));
-        total := total + round(q * rate, 2);
-        rest := rest - q;
-      end if;
-    end loop;
-    s := s || jsonb_build_object('edge_holes', greatest(rest, 0));
-  end if;
-  return jsonb_build_object('lines', lines, 'total', total, 's', s);
+if jsonb_typeof(pr->'hole_list') = 'array' and jsonb_typeof(s->'hdd') = 'object' then
+r := quote_dia_one(pr->'hole_list', s->'hdd', 'hole');
+lines := lines || (r->'lines'); total := total + (r->>'total')::numeric;
+hd := case when jsonb_typeof(s->'hd') = 'object' then s->'hd' else '{}'::jsonb end; done := 0;
+for e in select key, value from jsonb_each_text(s->'hdd') loop
+if e.key !~ '^[0-9]+([.][0-9]+)?$' then continue; end if;
+got := e.value::numeric - jnum(r->'left', e.key);
+if got > 0 then
+done := done + got;
+c := case when e.key::numeric <= 10 then 'a' when e.key::numeric <= 32 then 'b' when e.key::numeric <= 40 then 'c' else 'd' end;
+hd := hd || jsonb_build_object(c, greatest(jnum(hd, c) - got, 0));
+end if;
+end loop;
+s := s || jsonb_build_object('holes', greatest(jnum(s, 'holes') - done, 0), 'hd', hd);
+end if;
+if jsonb_typeof(pr->'edge_hole_list') = 'array' and jsonb_typeof(s->'ehd') = 'object' then
+r := quote_dia_one(pr->'edge_hole_list', s->'ehd', 'edge_hole');
+lines := lines || (r->'lines'); total := total + (r->>'total')::numeric; done := 0;
+for e in select key, value from jsonb_each_text(s->'ehd') loop
+if e.key ~ '^[0-9]+([.][0-9]+)?$' then done := done + greatest(e.value::numeric - jnum(r->'left', e.key), 0); end if;
+end loop;
+s := s || jsonb_build_object('edge_holes', greatest(jnum(s, 'edge_holes') - done, 0));
+end if;
+return jsonb_build_object('lines', lines, 'total', total, 's', s);
 end $$;
 
 create or replace function public.quote_calc(p_production uuid, p_stats jsonb) returns jsonb

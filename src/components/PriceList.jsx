@@ -80,8 +80,10 @@ export default function PriceList({ production, onClose }) {
       {diaRows(key).map((r, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <span style={{ fontSize: 13, flex: '0 0 auto' }}>Ø</span>
-          <input type="text" inputMode="decimal" placeholder="мм" value={r.d ?? ''} onChange={e => setDia(key, i, 'd', e.target.value)} style={{ ...inp, width: 64, flex: '0 0 auto' }} />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>мм — за отверстие</span>
+          <input type="text" inputMode="decimal" placeholder="мм" value={r.d ?? ''} onChange={e => setDia(key, i, 'd', e.target.value)} style={{ ...inp, width: 54, flex: '0 0 auto' }} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}>до</span>
+          <input type="text" inputMode="decimal" placeholder="—" value={r.to ?? ''} onChange={e => setDia(key, i, 'to', e.target.value)} style={{ ...inp, width: 54, flex: '0 0 auto' }} />
+          <span style={{ flex: 1 }} />
           <input type="text" inputMode="decimal" placeholder={data[base] ? String(data[base]) : 'цена'} value={r.price ?? ''} onChange={e => setDia(key, i, 'price', e.target.value)} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
           <button type="button" onClick={() => set(key, diaRows(key).filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, padding: '0 2px' }}>×</button>
         </div>
@@ -158,11 +160,11 @@ export default function PriceList({ production, onClose }) {
                     <Hint>Цена за метр прямой кромки по толщине плиты (строки) и кромки (столбцы). Пустая клетка — как раньше: «Кромка прямая до 1 мм» / «толще 1 мм». Склеенная деталь (2 × 16) считается как плита 30 мм и толще, если у широкой кромки нет своей цены.</Hint>
                   </div>
                 ))}
-                {g.id === 'drill' && section('Свои диаметры — своя цена', ['hole_list', 'edge_hole_list'], (
+                {g.id === 'drill' && section('Свои диаметры и диапазоны — своя цена', ['hole_list', 'edge_hole_list'], (
                   <div style={{ marginTop: 4 }}>
                     {diaList('hole_list', 'В пласть', 'hole')}
                     {diaList('edge_hole_list', 'В торец', 'edge_hole')}
-                    <Hint>Впишите диаметр и цену за отверстие — например Ø3, Ø4, Ø5, Ø8, Ø35, каждый со своей ценой. Отверстия этих диаметров считаются по своей цене; остальные — по диапазону ниже или по общей цене отверстия.</Hint>
+                    <Hint>Цена за отверстие. Только «Ø» — точный диаметр (Ø8 — своя цена, Ø5 — своя). «Ø … до …» — свой диапазон (Ø3 до 10 — одна цена на всё от 3 до 10 мм). Точный диаметр важнее диапазона. Что не попало в строки — по диапазонам ниже или по общей цене отверстия.</Hint>
                   </div>
                 ))}
                 {g.id === 'drill' && section('Отверстие в пласть по диаметру', HOLE_CLASSES.map(([c]) => 'hole_' + c), classList('hole_', HOLE_CLASSES, 'hole',
