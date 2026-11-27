@@ -59,3 +59,10 @@ export function refText(kind, url, { name = '', production = '', plain = false }
   if (kind === 'client') return `Здравствуйте!${production ? ` Это ${production}.` : ''} Оформляйте у нас заказы на раскрой через приложение RaskroyPro: вводите детали с телефона — карты раскроя сразу с нашим резом и отступами. Регистрация по ссылке, без ожидания: ${url}`
   return `Здравствуйте!${name ? ` Это ${name}.` : ''} Хочу отправлять вам заказы на раскрой через приложение RaskroyPro — карты раскроя будут сразу с вашим резом и отступами. Зарегистрируйте своё производство по ссылке — подтверждение не нужно: ${url}`
 }
+
+/** Имя и телефон пригласившего — кому написать первым в MAX (migration_ref_max.sql). -> { name, phone } | null */
+export async function refContact(code) {
+  if (!code) return null
+  const r = await call('ref_contact', { p_code: code })
+  return r.data || null
+}

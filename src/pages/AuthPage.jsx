@@ -7,7 +7,7 @@ import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, guessC
 import { useAuth, googleEnabled } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
-import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef } from '../lib/refLinks'
+import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef, refContact } from '../lib/refLinks'
 import { appVersionText } from '../lib/version'
 import { startGuest, pauseGuest, resumeGuest } from '../lib/guest'
 
@@ -36,6 +36,8 @@ export default function AuthPage() {
   // пригласительная ссылка (/r/код → «Зарегистрироваться», или код от пригласившего в WhatsApp с &r=код)
   const [refCode] = useState(() => { const r = (qs.get('r') || '').replace(/[^0-9a-f]/gi, ''); if (r) savePendingRef(r); return r || pendingRef() })
   const [refI, setRefI] = useState(null)   // { kind, inviter, production_name } — действующая ссылка
+  const [refC, setRefC] = useState(null)   // пригласивший: { name, phone } — кому написать первым в MAX
+  const company = refI?.kind === 'production'   // ссылка для производства — регистрируется компания: название вместо имени и фамилии
   useEffect(() => {
     if (!refCode) return
     let alive = true
@@ -224,8 +226,11 @@ export default function AuthPage() {
       } else if (mode === 'login') {
         await signInAny(form.phone, form.password)
       } else {
-        if (!nameOk(form.full_name)) throw new Error('Введите имя и фамилию полностью — например, Иван Петров')
-        if (byRequest && !nameLooksReal(form.full_name)) throw new Error('Укажите настоящие имя и фамилию (например: Иван Петров) — заявки без имени не одобряются')
+        if (company) { if (form.full_name.trim().length < 2) throw new Error('Введите название производства (компании)') }
+        else {
+          if (!nameOk(form.full_name)) throw new Error('Введите имя и фамилию полностью — например, Иван Петров')
+          if (byRequest && !nameLooksReal(form.full_name)) throw new Error('Укажите настоящие имя и фамилию (например: Иван Петров) — заявки без имени не одобряются')
+        }
         setPhoneTouched(true)
         if (phoneErr) throw new Error(phoneErr)
         if (!invite && form.country.trim().length < 2) throw new Error('Укажите страну')
@@ -239,6 +244,8 @@ export default function AuthPage() {
           if (r.error) throw new Error(r.error)
           await signupSetApp(regPhone, messenger)
           const byRef = r.ref === 'ok'
+          if (byRef && messenger === 'max') refContact(refCode).then(c => setRefC(c))
+          if (company) { try { localStorage.setItem('regCompany', form.full_name.trim()) } catch { /* без памяти */ } }
           setReq(r)
           const tgMode = r.messenger === 'telegram'
           if (r.registered) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход». Не помните пароль — «Забыли пароль?» или напишите разработчику ниже.')
@@ -443,7 +450,7 @@ export default function AuthPage() {
             {byRequest && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
                 {refI
-                  ? <>Подтвердим номер телефона: через Telegram — сразу, в один тап; через WhatsApp — код пришлёт {refBy ? `«${refBy}»` : 'тот, кто вас пригласил'}. Потом — пароль.</>
+                  ? <>Подтвердим номер телефона: через Telegram — сразу, в один тап; через WhatsApp или MAX — код пришлёт {refBy ? `«${refBy}»` : 'тот, кто вас пригласил'}. Потом — пароль.</>
                   : open
                   ? <>Сначала подтвердим номер телефона: через Telegram — сразу, в один тап; через WhatsApp — код пришлёт администратор. Потом — пароль.</>
                   : <>Регистрация сейчас по запросу. <b>Заявка уже одобрена?</b> Введите имя и тот же номер телефона, нажмите «Продолжить» — и откроется ввод кода и пароля.
@@ -452,8 +459,8 @@ export default function AuthPage() {
             )}
             {mode === 'register' && (
               <div>
-                <label className="label">Имя и фамилия *</label>
-                <input type="text" placeholder="Иван Иванов" value={form.full_name}
+                <label className="label">{company ? 'Название производства (компании) *' : 'Имя и фамилия *'}</label>
+                <input type="text" placeholder={company ? 'Например: Мебель-Профи' : 'Иван Иванов'} value={form.full_name}
                   onChange={e => set('full_name', e.target.value)} required />
               </div>
             )}
@@ -615,6 +622,22 @@ export default function AuthPage() {
                   <a href="https://max.ru" target="_blank" rel="noreferrer" className="btn-primary"
                     style={{ flex: '1 1 40%', textAlign: 'center', textDecoration: 'none', background: '#5B47E0' }}>Открыть MAX</a>
                 </div>
+              </div>
+            )}
+            {/* ссылка-приглашение + MAX: код присылает пригласивший — ему и написать первым */}
+            {mode === 'register' && messenger === 'max' && req?.ref === 'ok' && !req.registered && (
+              <div style={{ fontSize: 13, background: 'var(--bg2)', border: '1px solid #5B47E0', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Обязательно: напишите первым в MAX — {refC?.name || refBy || 'тому, кто вас пригласил'}</div>
+                <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                  {refC?.phone ? <>С вашего номера напишите в MAX на номер <b style={{ color: 'var(--text)' }}>{refC.phone}</b> одно слово: «Регистрация».</> : <>Напишите в MAX тому, кто прислал вам ссылку, одно слово: «Регистрация».</>}
+                  {' '}В ответ придёт код. Без вашего сообщения MAX может не пропустить ответ.
+                </div>
+                {refC?.phone && <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn-secondary" style={{ flex: '1 1 40%' }}
+                    onClick={async () => { try { await navigator.clipboard.writeText(String(refC.phone).replace(/\s/g, '')); setNote('Номер скопирован — найдите его в MAX и напишите.') } catch { /* без буфера */ } }}>Скопировать номер</button>
+                  <a href="https://max.ru" target="_blank" rel="noreferrer" className="btn-primary"
+                    style={{ flex: '1 1 40%', textAlign: 'center', textDecoration: 'none', background: '#5B47E0' }}>Открыть MAX</a>
+                </div>}
               </div>
             )}
             {mode === 'register' && req?.tg_token && !req.verified && !req.registered && (

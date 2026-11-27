@@ -5,6 +5,7 @@ import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { partnerMe } from '../lib/support'
+import { myRefPeople } from '../lib/refLinks'
 
 // «Официальный представитель RaskroyPro» (migration_partners.sql): статус выдаёт мастер-аккаунт технологу-внедренцу.
 // Кого партнёр пригласил своими ссылками («Пригласить производство», «Пригласить знакомого») — закрепляется за ним;
@@ -15,9 +16,11 @@ export default function PartnerPage() {
   const navigate = useNavigate()
   const [me, setMe] = useState(undefined)
   const [err, setErr] = useState('')
+  const [wait, setWait] = useState([])   // зарегистрировались по ссылке и ждут код от вас (WhatsApp / MAX)
   useEffect(() => {
     let alive = true
     partnerMe().then(r => { if (!alive) return; if (r.error) setErr(r.error); setMe(r.data || null) })
+    myRefPeople().then(r => { if (alive && r.data) setWait((r.data.pending || []).filter(p => p.messenger !== 'telegram' && !p.code_sent_at)) })
     return () => { alive = false }
   }, [user?.id])
   const head = <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Официальный представитель RaskroyPro</h1></div>
@@ -43,6 +46,15 @@ export default function PartnerPage() {
           <button type="button" className="btn-secondary" style={{ flex: '1 1 160px' }} onClick={() => navigate('/support')}>Обращения клиентов</button>
         </div>
       </div>
+      {wait.length > 0 && (
+        <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)' }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Ждут код от вас · {wait.length}</div>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '4px 0 8px' }}>
+            {wait.map(p => p.full_name || '+' + p.digits).join(', ')} — регистрируются по вашей ссылке через {wait.some(p => p.contact_app === 'max') ? 'MAX' : 'WhatsApp'}. Код готов — отправьте его одним нажатием.
+          </p>
+          <button type="button" className="btn-primary" onClick={() => navigate('/invite')}>Отправить код</button>
+        </div>
+      )}
       <div className="card">
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Мои клиенты · {clients.length}</div>
         {!clients.length ? <p style={{ fontSize: 12.5, color: 'var(--text-hint)' }}>Пока никого. Отправьте производству ссылку «Пригласить производство» — после регистрации оно появится здесь.</p> : clients.map(c => (

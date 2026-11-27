@@ -7,7 +7,8 @@ import { parseServices, servicesProblem, saveProductionServices } from '../lib/p
 // Форма «Моё производство»: название, страна, город, телефон — все поля обязательны; услуги — «да / нет» (раскрой обязателен).
 // sheet — рез и отступы станка (берутся из текущего заказа).
 export default function ProductionForm({ initial = null, sheet = null, submitLabel = 'Зарегистрировать производство', onDone, onCancel }) {
-  const [form, setForm] = useState({ name: initial?.name || '', phone: initial?.phone || '', city: initial?.city || '', country: initial?.country || '' })
+  // название компании, указанное при регистрации по ссылке «для производства» (AuthPage → regCompany)
+  const [form, setForm] = useState({ name: initial?.name || (() => { try { return localStorage.getItem('regCompany') || '' } catch { return '' } })(), phone: initial?.phone || '', city: initial?.city || '', country: initial?.country || '' })
   const [services, setServices] = useState(() => parseServices(initial?.services))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
