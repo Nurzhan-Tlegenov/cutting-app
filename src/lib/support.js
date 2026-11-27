@@ -160,3 +160,8 @@ export const setPartnerClient = (userId, partnerId) => pcall('admin_set_partner_
 export const adminPartnerMap = () => pcall('admin_partner_map')
 /** партнёр: { title, clients: [{ user_id, at, name, city, country, production, production_status, orders }] } | null */
 export const partnerMe = () => pcall('partner_me')
+// представитель сам регистрирует производство: телефон компании → код (migration_partner_register.sql)
+export async function partnerRegisterCompany(name, phone, country, city) {
+  const r = await call('partner_register_company', { p_name: name, p_phone: phone, p_country: country, p_city: city })
+  return r.missing ? { ...r, error: 'Регистрация компаний заработает после обновления сервера — сообщите разработчику' } : r
+}
